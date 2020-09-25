@@ -42,8 +42,8 @@ impl<T, H> Environment<T, H> where T: Eq + Hash, H: Eq + Hash {
         }
     }
 
-    pub fn bind(&mut self, var: T, val: H) {
-        self.map.insert(var, val); 
+    pub fn bind(&mut self, var: T, val: H) -> Option<H> {
+        return self.map.insert(var, val); 
     }
 
     pub fn extend(self, map: HashMap<T, H>) -> Self {
@@ -71,37 +71,28 @@ pub struct C0Program {
 
 // x86
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum reg {
-    rsp, rbp, rax, rbx, rcx, rdx, rsi, rdi, 
-    r8, r9, r10, r11, r12, r13, r14, r15,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum arg {
-    Reg(reg),
+pub enum x86 {
+    RSP, RBP, RAX, RBX, RCX, RDX, RSI, RDI, 
+    R8, R9, R10, R11, R12, R13, R14, R15,
     Imm(i64),
     Var(String),
-    Deref(reg, i64),
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum x86 {
-    Instr(String, Box<[arg]>),
+    Deref(Box<x86>, i64),
+    Instr(String, Box<[x86]>),
     Callq(String),
     Retq,
-    Pushq(arg),
-    Popq(arg),
+    Pushq(Box<x86>),
+    Popq(Box<x86>),
     Jmp(String),
 }
 
 #[derive(Debug)]
-pub struct Block {
-    info: Environment<String, x86>,
-    instr: Vec<x86>,
+pub struct x86Block {
+    pub info: Environment<String, Vec<x86>>,
+    pub instr: Vec<x86>,
 }
 
 #[derive(Debug)]
 pub struct x86Program {
     pub info: Environment<String, Vec<x86>>,
-    pub cfg: Vec<(String, Block)>, // control flow 
+    pub cfg: Vec<(String, x86Block)>, // control flow 
 }

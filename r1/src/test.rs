@@ -120,4 +120,46 @@ mod test {
         }
         assert_eq!(interp_r1(exp), 2);
     }
+    use crate::semantic::{C0Program, C0};
+    #[test]
+    fn test_explicate_control() {
+        use C0::*;
+        let e = "(let (x (+ 1 2))
+                    x)";
+        let mut exp = parse(e);
+        let mut exp = explicate_control(&mut exp);
+        if let C0Program { info: env, cfg: mut blocks } = exp {
+            let (label, mut codes) = blocks.pop().unwrap();
+            if let Seq(box Assign(box Var(x), box Prim(add, box [Int(n1), Int(n2)])), box Return(box Var(x_))) = &codes {
+                assert_eq!(x, x_);
+            } else {
+                panic!("explicate_control fails in cfg expand");
+            }
+        } else {
+            panic!("explicate_control fails in C0Program expand");
+        }
+    }
+    use crate::semantic::{x86, x86Block, x86Program};
+    #[test]
+    fn test_select_instruction() {
+        use x86::*;
+        let e = "(let (a 42)
+                    (let (b a)
+                        b))";
+        let mut exp = parse(e);
+        let mut exp = remove_complex_opera(&mut exp);
+        let mut exp = explicate_control(&mut exp);
+        let mut block = select_instruction(exp);
+        let x86Block { info, mut instr } = block;
+        match instr.as_slice() {
+            [mov1, mov2, mov3, jump] => {
+                if let Jmp(label) = jump {
+                    assert_eq!(label.as_str(), "conclusion");
+                } else {
+                    panic!("Jump fails");
+                }
+            }
+            _ => panic!("fails in select instruction"),
+        }
+    }
 }

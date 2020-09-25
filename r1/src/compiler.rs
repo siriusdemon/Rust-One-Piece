@@ -138,36 +138,107 @@ fn collect_vars(mut expr: &C0) -> Vec<C0> {
 }
 
 // ----------------- select instructions -----------------------------------
-use crate::semantic::{reg, arg, x86, x86Program};
-pub fn select_instruction(prog: C0Program) -> x86 {
-    let C0Program { info, cfg } = prog;
-     
-    x86::Retq 
+use crate::semantic::{x86, x86Block, x86Program};
+pub fn select_instruction(prog: C0Program) -> x86Block {
+    let C0Program { info, mut cfg } = prog;
+    let (label, codes_C0) = cfg.pop().unwrap();
+    let mut instr = vec![];
+    C0_to_x86(&codes_C0, &mut instr);
+    let x86_block = x86Block { info: C0info_to_x86info(info), instr};
+    return x86_block;
 }
 
-fn C0_to_x86(expr: C0, instrs: &mut Vec<x86>) {
+pub fn C0_to_x86(expr: &C0, code: &mut Vec<x86>) {
     use C0::*;
     match expr {
-        Assign(box Var(x), box e) => {
-            let e = match e {
-                Int(n) => arg::Imm(n),
-                Var(y) => arg::Var(y),
-                Prim(read, box []) if read.as_str() == "read" => {
-                    instrs.push( x86::Callq("read_int".to_string()));
-                    arg::Reg(reg::rax)
-                },
-                _ => panic!("impossible type!"),
-            };
-            let instr = x86::Instr("movq".to_string(), Box::new([e, arg::Var(x)]));
-            instrs.push(instr);
-        },
-        Prim(read, box []) if read.as_str() == "read" => {
+        Assign(box Var(x), box e) => assign_helper(e, x86::Var(x.to_string()), code),
+        Return(box e) => {
+            assign_helper(e, x86::RAX, code);
+            code.push( x86::Jmp("conclusion".to_string()) );
         }
-        Return(box exp) => C0_to_x86(exp, instrs),
         Seq(box assign, box tail) => {
-            C0_to_x86(assign, instrs);
-            C0_to_x86(tail, instrs);
+            C0_to_x86(assign, code);
+            C0_to_x86(tail, code);
         },
         _ => panic!("bad syntax"),
     }
 } 
+
+fn assign_helper(source: &C0, target: x86, code: &mut Vec<x86>) {
+    use C0::*;
+    match source {
+        Int(n) => code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target]))),
+        Var(y) => code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target]))),
+        Prim(read, box []) if read.as_str() == "read" => {
+                code.push( x86::Callq("read_int".to_string()));
+                code.push( x86::Instr("movq".to_string(), Box::new([x86::RAX, target])));
+            },
+            Prim(add, box [e1, e2]) if add.as_str() == "+" => {
+                match (e1, e2) {
+                    (Int(n1), Int(n2)) => {
+                        code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n1), target.clone()])));
+                        code.push( x86::Instr("addq".to_string(), Box::new([x86::Imm(*n2), target])));
+                    },
+                    (Var(y), Int(n)) | (Int(n), Var(y)) => {
+                        if let x86::Var(x) = &target {
+                            if y.as_str() == x.as_str() {
+                                code.push( x86::Instr("addq".to_string(), Box::new([x86::Imm(*n), target])));
+                            } else {
+                                code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target.clone()])));
+                                code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(y.to_string()), target])));
+                            }
+                        } else {
+                            code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target.clone()])));
+                            code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(y.to_string()), target])));
+                        }
+                    },
+                    (Var(y), Var(z)) => {
+                        if let x86::Var(x) = &target {
+                            if y.as_str() == x.as_str() {
+                                code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(z.to_string()), target])));
+                            } else if z.as_str() == x.as_str() {
+                                code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(y.to_string()), target])));
+                            } else {
+                                code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target.clone()])));
+                                code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(z.to_string()), target])));
+                            }
+                        } else {
+                            code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target.clone()])));
+                            code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(z.to_string()), target])));
+                        }
+                    }
+                    _ => panic!("uncover"),
+                }
+            },
+            Prim(neg, box [e]) if neg.as_str() == "-" => {
+                match e {
+                    Int(n) => {
+                        code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target.clone()])) );
+                        code.push( x86::Instr("negq".to_string(), Box::new([target])));
+                    },
+                    Var(y) => {
+                        code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target.clone()])) );
+                        code.push( x86::Instr("negq".to_string(), Box::new([target])));
+                    },
+                    _ => panic!("bad syntax!"),
+                };
+            },
+            _ => panic!("Invalid form for assignment!"),
+        };
+}
+
+
+fn C0info_to_x86info(info: Environment<String, Vec<C0>>) -> Environment<String, Vec<x86>> {
+    let mut new_info = Environment::new();
+    for key in info.map.keys() {
+        let mut new_vars = vec![];
+        let values = info.map.get(key).unwrap();
+        for x in values.iter() {
+            if let C0::Var(x) = x {
+                new_vars.push( x86::Var(x.to_string()));
+            }
+        }
+        new_info.bind(key.to_string(), new_vars);
+    }
+    return new_info;
+}

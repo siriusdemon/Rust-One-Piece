@@ -35,14 +35,4 @@ fn interp_r1(expr: Expr) -> i64 {
 
 fn main()
 {
-    use crate::compiler::{remove_complex_opera, explicate_control, select_instruction};
-    let e = "(let (a 42)
-              (let (b a)
-                b))";
-    let mut exp = parse(e);
-    let mut exp = remove_complex_opera(&mut exp);
-    let mut exp = explicate_control(&mut exp);
-    println!("{:?}", exp);
-    let mut exp = select_instruction(exp);
-    println!("{:?}", exp);
 }

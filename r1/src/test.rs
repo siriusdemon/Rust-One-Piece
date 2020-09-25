@@ -48,6 +48,13 @@ mod test {
         assert_eq!(exp, res);
     }
     #[test]
+    fn test_parser_atom() {
+        let e = "1";
+        let exp = Int(1);
+        let res = parse(e);
+        assert_eq!(exp, res);
+    }
+    #[test]
     fn test_interp_r1() {
         let e = "(let (x 8) (let (y 34) (+ x y)))";
         let exp = parse(e);

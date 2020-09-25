@@ -35,7 +35,11 @@ pub fn parse_list(expr: &str) -> Sexpr {
             _ => (),
         }
     } 
-    return list.pop().unwrap();
+    if !sym.is_empty() {
+        return Atom(sym);
+    } else {
+        return list.pop().unwrap();
+    }
 }
 
 // syntax

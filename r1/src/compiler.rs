@@ -263,7 +263,7 @@ fn build_symbol_table(locals: &Vec<x86>) -> Environment<&x86, x86> {
     use x86::*;
     let mut symtable = Environment::new();
     for (i, var) in locals.iter().enumerate() {
-        symtable.bind(var, Deref(Box::new(RBP), i as i64 * -8));
+        symtable.bind(var, Deref(Box::new(RBP), (i+1) as i64 * -8));
     }
     return symtable;
 }

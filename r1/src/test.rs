@@ -136,11 +136,7 @@ fn test_explicate_control() {
     let exp = explicate_control(&mut exp);
     if let C0Program { locals, cfg: mut blocks } = exp {
         let (label, codes) = blocks.pop().unwrap();
-        if let Seq(box Assign(box Var(x), box Prim(add, box [Int(n1), Int(n2)])), box Return(box Var(x_))) = &codes {
-            assert_eq!(x, x_);
-        } else {
-            panic!("explicate_control fails in cfg expand");
-        }
+        assert!(matches!(&codes, Seq(box Assign(box Var(x), box Prim(add, box [Int(n1), Int(n2)])), box Return(box Var(x_))) if x == x_));
     } else {
         panic!("explicate_control fails in C0Program expand");
     }
@@ -158,13 +154,31 @@ fn test_select_instruction() {
     let block = select_instruction(exp);
     let x86Block { locals, instr, stack_space } = block;
     match instr.as_slice() {
-        [_mov1, _mov2, _mov3, jump] => {
-            if let Jmp(label) = jump {
-                assert_eq!(label.as_str(), "conclusion");
-            } else {
-                panic!("Jump fails");
-            }
-        }
+        [_mov1, _mov2, _mov3, jump] => assert!(matches!(jump, Jmp(label) if label.as_str() == "conclusion")),
         _ => panic!("fails in select instruction"),
+    }
+}
+#[test]
+fn test_assign_homes() {
+    use x86::*;
+    let e = "(let (a 42)
+                (let (b a)
+                    b))";
+    let mut exp = parse(e);
+    let mut exp = remove_complex_opera(&mut exp);
+    let exp = explicate_control(&mut exp);
+    let block = select_instruction(exp);
+    let block = assign_homes(block);
+    let x86Block { locals, instr, stack_space } = block;
+    match instr.as_slice() {
+        [mov1, mov2, mov3, _jump] => {
+            assert!(matches!(mov1, Instr(mov, box [Imm(n), Deref(box reg, disp)]) 
+                                    if mov.as_str() == "movq" && *n == 42 && *reg == x86::RBP && *disp == -8));
+            assert!(matches!(mov2, Instr(mov, box [Deref(box reg1, disp1), Deref(box reg2, disp2)]) 
+                                    if mov.as_str() == "movq" && reg1 == reg2 && *disp1 == -8 && *disp2 == -16));
+            assert!(matches!(mov3, Instr(mov, box [Deref(box reg, disp), rax]) 
+                                    if mov.as_str() == "movq" && *reg == x86::RBP && *disp == -16 && *rax == x86::RAX));
+        },
+        _ => panic!("test assign_home fails"),
     }
 }

@@ -152,8 +152,8 @@ fn test_select_instruction() {
     let mut exp = remove_complex_opera(&mut exp);
     let exp = explicate_control(&mut exp);
     let block = select_instruction(exp);
-    let x86Block { locals, instr, stack_space } = block;
-    match instr.as_slice() {
+    let x86Block { locals, instructions, stack_space } = block;
+    match instructions.as_slice() {
         [_mov1, _mov2, _mov3, jump] => assert!(matches!(jump, Jmp(label) if label.as_str() == "conclusion")),
         _ => panic!("fails in select instruction"),
     }
@@ -169,8 +169,8 @@ fn test_assign_homes() {
     let exp = explicate_control(&mut exp);
     let block = select_instruction(exp);
     let block = assign_homes(block);
-    let x86Block { locals, instr, stack_space } = block;
-    match instr.as_slice() {
+    let x86Block { locals, instructions, stack_space } = block;
+    match instructions.as_slice() {
         [mov1, mov2, mov3, _jump] => {
             assert!(matches!(mov1, Instr(mov, box [Imm(n), Deref(box reg, disp)]) 
                                     if mov.as_str() == "movq" && *n == 42 && *reg == x86::RBP && *disp == -8));

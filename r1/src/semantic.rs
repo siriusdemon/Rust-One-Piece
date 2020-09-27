@@ -88,7 +88,7 @@ pub enum x86 {
 #[derive(Debug)]
 pub struct x86Block {
     pub locals: Vec<x86>,
-    pub instr: Vec<x86>,
+    pub instructions: Vec<x86>,
     pub stack_space: usize,
 }
 

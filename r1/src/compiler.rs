@@ -1,4 +1,3 @@
-/// make variable name unique
 use crate::semantic::Expr::{self, *};
 use crate::semantic::Environment;
 use crate::helper::gensym;
@@ -140,8 +139,8 @@ use crate::semantic::{x86, x86Block, x86Program};
 pub fn select_instruction(prog: C0Program) -> x86Block {
     let C0Program { locals, mut cfg } = prog;
     let (label, codes_C0) = cfg.pop().unwrap();
-    let mut instr = C0_to_x86(&codes_C0);
-    let x86_block = x86Block { instr, locals: C0info_to_x86info(locals), stack_space: 0 };
+    let mut instructions = C0_to_x86(&codes_C0);
+    let x86_block = x86Block { instructions, locals: C0info_to_x86info(locals), stack_space: 0 };
     return x86_block;
 }
 
@@ -246,11 +245,11 @@ fn C0info_to_x86info(locals: Vec<C0>) -> Vec<x86> {
 const FRAME: usize = 16;
 const BYTE: usize = 8;
 pub fn assign_homes(block: x86Block) -> x86Block {
-    let x86Block { mut locals, mut instr, stack_space} = block;
+    let x86Block { mut locals, mut instructions, stack_space} = block;
     let stack_space = align_address(locals.len() * BYTE, FRAME);
     let symtable = build_symbol_table(&locals);
-    let instr = assign_homes_helper(instr, &symtable);
-    return x86Block {locals, instr, stack_space};
+    let instructions = assign_homes_helper(instructions, &symtable);
+    return x86Block {locals, instructions, stack_space};
 }
 
 #[inline]
@@ -286,4 +285,9 @@ fn assign_homes_helper(instr: Vec<x86>, symtable: &Environment<&x86, x86>) -> Ve
     }
     let instr = instr.iter().map(|e| helper(e, symtable)).collect();
     return instr;
+}
+
+// ---------------------------------- patch instructions ---------------------------------------------
+pub fn patch_instructions(block: x86Block)  {
+    let x86Block { locals, instructions, stack_space} = block;
 }

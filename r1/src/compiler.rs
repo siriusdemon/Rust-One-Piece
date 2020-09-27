@@ -319,16 +319,8 @@ pub fn print_x86(block: x86Block, filename: &str) -> std::io::Result<()> {
 fn print_instructions(instructions: Vec<x86>, file: &mut File) -> std::io::Result<()> {
     use x86::*;
     for instr in instructions.into_iter() {
-        match instr {
-            Jmp(label) => {
-                let code = format!("jmp {}", label);
-                file.write(code.as_bytes())?;
-            },
-            Pushq(box reg) => {
-                let code = format!("pushq %{}", reg);
-            },
-            _ => panic!("哈"),
-        }
+        let code = format!("{}", instr);
+        file.write(code.as_bytes())?;
     }
     return Ok(());
 }

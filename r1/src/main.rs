@@ -33,20 +33,5 @@ fn interp_r1(expr: Expr) -> i64 {
 }
 
 fn main() -> std::io::Result<()> {
-    use crate::semantic::x86;
-    let n = x86::Imm(10);
-    println!("{}", n);
-    let deref = x86::Deref(Box::new(x86::RBP), 10);
-    println!("{}", deref);
-    let instr = x86::Instr("movq".to_string(), Box::new([n, deref]));
-    println!("{}", instr);
-    let call = x86::Callq("read_int".to_string());
-    println!("{}", call);
-    let push = x86::Pushq(Box::new(x86::RBP));
-    println!("{}", push);
-    let pop = x86::Popq(Box::new(x86::RSP));
-    println!("{}", pop);
-    let var = x86::Var("haha".to_string());
-    println!("{}", var);
     Ok(())
 }

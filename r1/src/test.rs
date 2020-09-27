@@ -206,3 +206,26 @@ fn test_patch_instructions() {
         _ => panic!("test assign_home fails"),
     }
 }
+
+#[test]
+fn test_x86_display() {
+    let n = x86::Imm(10);
+    assert_eq!(format!("{}", n), "$10");
+    let deref = x86::Deref(Box::new(x86::RBP), 10);
+    assert_eq!(format!("{}", deref), "10(%rbp)");
+    let instr = x86::Instr("movq".to_string(), Box::new([n, deref]));
+    assert_eq!(format!("{}", instr), "movq $10, 10(%rbp)");
+
+    let call = x86::Callq("read_int".to_string());
+    let push = x86::Pushq(Box::new(x86::RBP));
+    let pop = x86::Popq(Box::new(x86::RSP));
+    assert_eq!(format!("{}", call), "callq read_int");
+    assert_eq!(format!("{}", push), "pushq %rbp");
+    assert_eq!(format!("{}", pop), "popq %rsp");
+}
+#[test]
+#[should_panic]
+fn test_invalid_x86_display() {
+    let var = x86::Var("haha".to_string());
+    let f = format!("{}", var);
+}

@@ -134,7 +134,7 @@ fn test_explicate_control() {
                 x)";
     let mut exp = parse(e);
     let exp = explicate_control(&mut exp);
-    if let C0Program { info: env, cfg: mut blocks } = exp {
+    if let C0Program { locals, cfg: mut blocks } = exp {
         let (label, codes) = blocks.pop().unwrap();
         if let Seq(box Assign(box Var(x), box Prim(add, box [Int(n1), Int(n2)])), box Return(box Var(x_))) = &codes {
             assert_eq!(x, x_);
@@ -156,7 +156,7 @@ fn test_select_instruction() {
     let mut exp = remove_complex_opera(&mut exp);
     let exp = explicate_control(&mut exp);
     let block = select_instruction(exp);
-    let x86Block { info, instr } = block;
+    let x86Block { locals, instr, stack_space } = block;
     match instr.as_slice() {
         [_mov1, _mov2, _mov3, jump] => {
             if let Jmp(label) = jump {

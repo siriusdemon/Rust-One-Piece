@@ -65,7 +65,7 @@ pub enum C0 {
 
 #[derive(Debug)]
 pub struct C0Program {
-    pub info: Environment<String, Vec<C0>>,
+    pub locals: Vec<C0>,
     pub cfg: Vec<(String, C0)>, // control flow 
 }
 
@@ -87,12 +87,12 @@ pub enum x86 {
 
 #[derive(Debug)]
 pub struct x86Block {
-    pub info: Environment<String, Vec<x86>>,
+    pub locals: Vec<x86>,
     pub instr: Vec<x86>,
+    pub stack_space: usize,
 }
 
 #[derive(Debug)]
 pub struct x86Program {
-    pub info: Environment<String, Vec<x86>>,
     pub cfg: Vec<(String, x86Block)>, // control flow 
 }

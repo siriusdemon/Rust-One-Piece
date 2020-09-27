@@ -72,10 +72,8 @@ use crate::semantic::{C0, C0Program};
 pub fn explicate_control(expr: &mut Expr) -> C0Program {
     let expr = let_to_seq(expr);
     let expr = flatten_seq(expr);
-    let mut info = Environment::new();
-    let vars = collect_vars(&expr);
-    info.bind("locals".to_string(), vars);
-    C0Program { info, cfg: vec![("start".to_string(), expr)]}
+    let locals = collect_vars(&expr);
+    C0Program { locals, cfg: vec![("start".to_string(), expr)]}
 }
 
 
@@ -140,10 +138,10 @@ fn collect_vars(mut expr: &C0) -> Vec<C0> {
 // ----------------- select instructions -----------------------------------
 use crate::semantic::{x86, x86Block, x86Program};
 pub fn select_instruction(prog: C0Program) -> x86Block {
-    let C0Program { info, mut cfg } = prog;
+    let C0Program { locals, mut cfg } = prog;
     let (label, codes_C0) = cfg.pop().unwrap();
     let mut instr = C0_to_x86(&codes_C0);
-    let x86_block = x86Block { info: C0info_to_x86info(info), instr};
+    let x86_block = x86Block { instr, locals: C0info_to_x86info(locals), stack_space: 0 };
     return x86_block;
 }
 
@@ -234,20 +232,58 @@ fn assign_helper(source: &C0, target: x86, code: &mut Vec<x86>) {
 }
 
 
-fn C0info_to_x86info(info: Environment<String, Vec<C0>>) -> Environment<String, Vec<x86>> {
-    let mut new_info = Environment::new();
-    for key in info.map.keys() {
-        let mut new_vars = vec![];
-        let values = info.map.get(key).unwrap();
-        for x in values.iter() {
-            if let C0::Var(x) = x {
-                new_vars.push( x86::Var(x.to_string()));
-            }
+fn C0info_to_x86info(locals: Vec<C0>) -> Vec<x86> {
+    let mut new_vars = vec![];
+    for x in locals.iter() {
+        if let C0::Var(x) = x {
+            new_vars.push( x86::Var(x.to_string()));
         }
-        new_info.bind(key.to_string(), new_vars);
     }
-    return new_info;
+    return new_vars;
 }
 
 // ----------------- assign homes -----------------------------------
-pub fn assign_homes() {}
+const FRAME: usize = 16;
+const BYTE: usize = 8;
+pub fn assign_homes(block: x86Block) -> x86Block {
+    let x86Block { mut locals, mut instr, stack_space} = block;
+    let stack_space = align_address(locals.len() * BYTE, FRAME);
+    let symtable = build_symbol_table(&locals);
+    let instr = assign_homes_helper(instr, &symtable);
+    return x86Block {locals, instr, stack_space};
+}
+
+#[inline]
+fn align_address(space: usize, align: usize) -> usize {
+    let remain = space % align;
+    if remain == 0 { space } else { space + align - remain }
+}
+
+fn build_symbol_table(locals: &Vec<x86>) -> Environment<&x86, x86> {
+    use x86::*;
+    let mut symtable = Environment::new();
+    for (i, var) in locals.iter().enumerate() {
+        symtable.bind(var, Deref(Box::new(RBP), i as i64 * -8));
+    }
+    return symtable;
+}
+
+fn assign_homes_helper(instr: Vec<x86>, symtable: &Environment<&x86, x86>) -> Vec<x86> {
+    use x86::*;
+    fn helper(expr: &x86, symtable: &Environment<&x86, x86>) -> x86 {
+        match expr {
+            Var(x)  => {
+                symtable.map.get(&Var(x.to_string())).unwrap().clone()
+            },
+            Instr(op, box [e]) => {
+                Instr(op.to_string(), Box::new([helper(e, symtable)]))
+            },
+            Instr(op, box [e1, e2]) => {
+                Instr(op.to_string(), Box::new([helper(e1, symtable), helper(e2, symtable)]))
+            },
+            e => e.clone()
+        }
+    }
+    let instr = instr.iter().map(|e| helper(e, symtable)).collect();
+    return instr;
+}

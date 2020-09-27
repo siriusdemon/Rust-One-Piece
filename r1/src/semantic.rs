@@ -96,3 +96,26 @@ pub struct x86Block {
 pub struct x86Program {
     pub cfg: Vec<(String, x86Block)>, // control flow 
 }
+
+use std::fmt;
+impl fmt::Display for x86 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use x86::*;
+        match self {
+            RAX => write!(f, "%rax"), RBX => write!(f, "%rbx"), RCX => write!(f, "%rcx"), RDX => write!(f, "%rdx"), 
+            RSI => write!(f, "%rsi"), RDI => write!(f, "%rdi"), RBP => write!(f, "%rbp"), RSP => write!(f, "%rsp"), 
+            R8  => write!(f, "%r8"),  R9  => write!(f, "%r9"),  R10 => write!(f, "%r10"), R11 => write!(f, "%r11"), 
+            R12 => write!(f, "%r12"), R13 => write!(f, "%r13"), R14 => write!(f, "%r14"), R15 => write!(f, "%r15"),
+            Imm(n) => write!(f, "${}", n),
+            Deref(box reg, n) => write!(f, "{}({})", n, reg),
+            Instr(op, box [e]) => write!(f, "{} {}", op, e),
+            Instr(op, box [e1, e2]) => write!(f, "{} {}, {}", op, e1, e2),
+            Callq(function) => write!(f, "callq {}", function),
+            Retq => write!(f, "retq"),
+            Pushq(box reg) => write!(f, "pushq {}", reg),
+            Popq(box reg) => write!(f, "popq {}", reg),
+            Jmp(label) => write!(f, "jmp {}", label),
+            e => panic!("invalid x86 code"),
+        }
+    }
+}

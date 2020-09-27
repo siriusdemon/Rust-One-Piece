@@ -90,6 +90,7 @@ pub struct x86Block {
     pub locals: Vec<x86>,
     pub instructions: Vec<x86>,
     pub stack_space: usize,
+    pub name: String,
 }
 
 #[derive(Debug)]

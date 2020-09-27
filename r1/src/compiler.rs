@@ -140,7 +140,7 @@ pub fn select_instruction(prog: C0Program) -> x86Block {
     let C0Program { locals, mut cfg } = prog;
     let (label, codes_C0) = cfg.pop().unwrap();
     let mut instructions = C0_to_x86(&codes_C0);
-    let x86_block = x86Block { instructions, locals: C0info_to_x86info(locals), stack_space: 0 };
+    let x86_block = x86Block { instructions, locals: C0info_to_x86info(locals), stack_space: 0, name: "start".to_string() };
     return x86_block;
 }
 
@@ -245,11 +245,11 @@ fn C0info_to_x86info(locals: Vec<C0>) -> Vec<x86> {
 const FRAME: usize = 16;
 const BYTE: usize = 8;
 pub fn assign_homes(block: x86Block) -> x86Block {
-    let x86Block { mut locals, instructions, stack_space} = block;
+    let x86Block { mut locals, instructions, stack_space, name} = block;
     let stack_space = align_address(locals.len() * BYTE, FRAME);
     let symtable = build_symbol_table(&locals);
     let instructions = assign_homes_helper(instructions, &symtable);
-    return x86Block {locals, instructions, stack_space};
+    return x86Block {locals, instructions, stack_space, name};
 }
 
 #[inline]
@@ -290,7 +290,7 @@ fn assign_homes_helper(instr: Vec<x86>, symtable: &Environment<&x86, x86>) -> Ve
 // ---------------------------------- patch instructions ---------------------------------------------
 pub fn patch_instructions(block: x86Block) -> x86Block {
     use x86::*;
-    let x86Block { locals, instructions, stack_space} = block;
+    let x86Block { locals, instructions, stack_space, name } = block;
     let mut new_instructions = vec![];
     for instr in instructions.iter() {
         match instr {
@@ -301,26 +301,47 @@ pub fn patch_instructions(block: x86Block) -> x86Block {
             e => new_instructions.push( e.clone() ),
         }
     }
-    return x86Block { locals, instructions: new_instructions, stack_space };
+    return x86Block { locals, instructions: new_instructions, stack_space, name };
 }
 
 // ---------------------------------- print x86 ---------------------------------------------
 use std::io::Write;
 use std::fs::File;
 pub fn print_x86(block: x86Block, filename: &str) -> std::io::Result<()> {
-    let x86Block { locals, instructions, stack_space } = block;
-
     let mut file = File::create(filename)?;
-    let content = "adhl";
-    file.write(&content.as_bytes())?;
+    print_block(block, &mut file)?;
     return Ok(()); 
+}
+
+fn print_block(block: x86Block, file: &mut File) -> std::io::Result<()> {
+    let x86Block { locals, instructions, stack_space, name } = block;
+    file.write(name.as_bytes())?;
+    file.write(b":")?;
+    print_instructions(instructions, file)?;
+    Ok(())
 }
 
 fn print_instructions(instructions: Vec<x86>, file: &mut File) -> std::io::Result<()> {
     use x86::*;
     for instr in instructions.into_iter() {
-        let code = format!("{}", instr);
+        let code = format!("    {}", instr);
         file.write(code.as_bytes())?;
     }
     return Ok(());
 }
+
+fn print_globl_entry(file: &mut File) -> std::io::Result<usize> {
+    if std::env::consts::OS == "macos" {
+        file.write(b".globl _main")
+    } else {
+        file.write(b".globl main")
+    }
+}
+
+// fn build_prelude() -> Vec<x86> {
+
+// }
+
+// fn build_conclusion() -> Vec<x86> {
+
+// }

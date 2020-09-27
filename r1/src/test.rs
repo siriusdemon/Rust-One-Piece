@@ -182,3 +182,27 @@ fn test_assign_homes() {
         _ => panic!("test assign_home fails"),
     }
 }
+
+#[test]
+fn test_patch_instructions() {
+    use x86::*;
+    let e = "(let (a 42)
+                (let (b a)
+                    b))";
+    let mut exp = parse(e);
+    let mut exp = remove_complex_opera(&mut exp);
+    let exp = explicate_control(&mut exp);
+    let block = select_instruction(exp);
+    let block = assign_homes(block);
+    let block = patch_instructions(block);
+    let x86Block { locals, instructions, stack_space } = block;
+    match instructions.as_slice() {
+        [_mov1, mov2, mov3, _mov4, _jump] => {
+            assert!(matches!(mov2, Instr(mov, box [Deref(box reg1, disp1), rax]) 
+                                    if mov.as_str() == "movq"  && *rax == x86::RAX));
+            assert!(matches!(mov3, Instr(mov, box [rax, Deref(box reg, disp)]) 
+                                    if mov.as_str() == "movq" && *reg == x86::RBP && *disp == -16 && *rax == x86::RAX));
+        },
+        _ => panic!("test assign_home fails"),
+    }
+}

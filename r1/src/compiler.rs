@@ -245,7 +245,7 @@ fn C0info_to_x86info(locals: Vec<C0>) -> Vec<x86> {
 const FRAME: usize = 16;
 const BYTE: usize = 8;
 pub fn assign_homes(block: x86Block) -> x86Block {
-    let x86Block { mut locals, mut instructions, stack_space} = block;
+    let x86Block { mut locals, instructions, stack_space} = block;
     let stack_space = align_address(locals.len() * BYTE, FRAME);
     let symtable = build_symbol_table(&locals);
     let instructions = assign_homes_helper(instructions, &symtable);
@@ -288,6 +288,18 @@ fn assign_homes_helper(instr: Vec<x86>, symtable: &Environment<&x86, x86>) -> Ve
 }
 
 // ---------------------------------- patch instructions ---------------------------------------------
-pub fn patch_instructions(block: x86Block)  {
+pub fn patch_instructions(block: x86Block) -> x86Block {
+    use x86::*;
     let x86Block { locals, instructions, stack_space} = block;
+    let mut new_instructions = vec![];
+    for instr in instructions.iter() {
+        match instr {
+            Instr(movq, box [Deref(box reg1, n1), Deref(box reg2, n2)]) => {
+                new_instructions.push( Instr(movq.to_string(), Box::new([ Deref(Box::new(reg1.clone()), *n1), RAX ])) );
+                new_instructions.push( Instr(movq.to_string(), Box::new([ RAX, Deref(Box::new(reg2.clone()), *n2) ])) );
+            },
+            e => new_instructions.push( e.clone() ),
+        }
+    }
+    return x86Block { locals, instructions: new_instructions, stack_space };
 }

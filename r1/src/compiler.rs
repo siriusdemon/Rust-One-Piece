@@ -142,13 +142,19 @@ use crate::semantic::{x86, x86Block, x86Program};
 pub fn select_instruction(prog: C0Program) -> x86Block {
     let C0Program { info, mut cfg } = prog;
     let (label, codes_C0) = cfg.pop().unwrap();
-    let mut instr = vec![];
-    C0_to_x86(&codes_C0, &mut instr);
+    let mut instr = C0_to_x86(&codes_C0);
     let x86_block = x86Block { info: C0info_to_x86info(info), instr};
     return x86_block;
 }
 
-pub fn C0_to_x86(expr: &C0, code: &mut Vec<x86>) {
+
+pub fn C0_to_x86(expr: &C0) -> Vec<x86> {
+    let mut instr = vec![];
+    C0_to_x86_helper(&expr, &mut instr);
+    return instr;
+}
+
+pub fn C0_to_x86_helper(expr: &C0, code: &mut Vec<x86>) {
     use C0::*;
     match expr {
         Assign(box Var(x), box e) => assign_helper(e, x86::Var(x.to_string()), code),
@@ -157,8 +163,8 @@ pub fn C0_to_x86(expr: &C0, code: &mut Vec<x86>) {
             code.push( x86::Jmp("conclusion".to_string()) );
         }
         Seq(box assign, box tail) => {
-            C0_to_x86(assign, code);
-            C0_to_x86(tail, code);
+            C0_to_x86_helper(assign, code);
+            C0_to_x86_helper(tail, code);
         },
         _ => panic!("bad syntax"),
     }
@@ -242,3 +248,6 @@ fn C0info_to_x86info(info: Environment<String, Vec<C0>>) -> Environment<String, 
     }
     return new_info;
 }
+
+// ----------------- assign homes -----------------------------------
+pub fn assign_homes() {}

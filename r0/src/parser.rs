@@ -5,11 +5,10 @@ pub enum Sexpr {
 }
 
 pub use Sexpr::{Atom, List};
-
 use crate::{Expr, Int, Prim};
 
 
-pub fn parse_list(expr: &str) -> Sexpr {
+pub fn scan(expr: &str) -> Sexpr {
     let mut stack = vec![];
     let mut sym = String::new();
     let mut list = vec![];
@@ -37,20 +36,17 @@ pub fn parse_list(expr: &str) -> Sexpr {
     return list.pop().unwrap();
 }
 
-pub fn parse_sexpr(sexpr: &Sexpr) -> Expr<'static> {
+pub fn parse_sexpr(sexpr: &Sexpr) -> Expr {
     match sexpr {
         Atom(s) => {
             let val: i64 = s.parse().expect("Not an integer!");
-            Int { val }
+            Int(val)
         },
         List(v) => {
-            let _read = String::from("read");
-            let _sub = String::from("-");
-            let _add = String::from("+");
             match v.as_slice() {
-                [Atom(_read)] => Prim { op: "read", args: Box::new([])},
-                [Atom(_sub), e] => Prim { op: "-", args: Box::new([parse_sexpr(e)])},
-                [Atom(_add), e1, e2] => Prim { op: "+", args: Box::new([parse_sexpr(e1), parse_sexpr(e2)])},
+                [Atom(op)] if op.as_str() == "read" => Prim ( op.to_string(), Box::new([])),
+                [Atom(op), e] if op.as_str() == "-" => Prim ( op.to_string(), Box::new([parse_sexpr(e)])),
+                [Atom(op), e1, e2] if op.as_str() == "+" => Prim ( op.to_string(), Box::new([parse_sexpr(e1), parse_sexpr(e2)])),
                 _ => panic!(),
             }
         }
@@ -59,7 +55,7 @@ pub fn parse_sexpr(sexpr: &Sexpr) -> Expr<'static> {
 
 
 pub fn parse(expr: &str) -> Expr {
-    let sexpr = parse_list(expr);
+    let sexpr = scan(expr);
     let expr = parse_sexpr(&sexpr);
     return expr;
 }

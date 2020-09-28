@@ -173,60 +173,60 @@ fn assign_helper(source: &C0, target: x86, code: &mut Vec<x86>) {
         Int(n) => code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target]))),
         Var(y) => code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target]))),
         Prim(read, box []) if read.as_str() == "read" => {
-                code.push( x86::Callq("read_int".to_string()));
-                code.push( x86::Instr("movq".to_string(), Box::new([x86::RAX, target])));
-            },
-            Prim(add, box [e1, e2]) if add.as_str() == "+" => {
-                match (e1, e2) {
-                    (Int(n1), Int(n2)) => {
-                        code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n1), target.clone()])));
-                        code.push( x86::Instr("addq".to_string(), Box::new([x86::Imm(*n2), target])));
-                    },
-                    (Var(y), Int(n)) | (Int(n), Var(y)) => {
-                        if let x86::Var(x) = &target {
-                            if y.as_str() == x.as_str() {
-                                code.push( x86::Instr("addq".to_string(), Box::new([x86::Imm(*n), target])));
-                            } else {
-                                code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target.clone()])));
-                                code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(y.to_string()), target])));
-                            }
+            code.push( x86::Callq("read_int".to_string()));
+            code.push( x86::Instr("movq".to_string(), Box::new([x86::RAX, target])));
+        },
+        Prim(add, box [e1, e2]) if add.as_str() == "+" => {
+            match (e1, e2) {
+                (Int(n1), Int(n2)) => {
+                    code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n1), target.clone()])));
+                    code.push( x86::Instr("addq".to_string(), Box::new([x86::Imm(*n2), target])));
+                },
+                (Var(y), Int(n)) | (Int(n), Var(y)) => {
+                    if let x86::Var(x) = &target {
+                        if y.as_str() == x.as_str() {
+                            code.push( x86::Instr("addq".to_string(), Box::new([x86::Imm(*n), target])));
                         } else {
                             code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target.clone()])));
                             code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(y.to_string()), target])));
                         }
-                    },
-                    (Var(y), Var(z)) => {
-                        if let x86::Var(x) = &target {
-                            if y.as_str() == x.as_str() {
-                                code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(z.to_string()), target])));
-                            } else if z.as_str() == x.as_str() {
-                                code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(y.to_string()), target])));
-                            } else {
-                                code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target.clone()])));
-                                code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(z.to_string()), target])));
-                            }
+                    } else {
+                        code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target.clone()])));
+                        code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(y.to_string()), target])));
+                    }
+                },
+                (Var(y), Var(z)) => {
+                    if let x86::Var(x) = &target {
+                        if y.as_str() == x.as_str() {
+                            code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(z.to_string()), target])));
+                        } else if z.as_str() == x.as_str() {
+                            code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(y.to_string()), target])));
                         } else {
                             code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target.clone()])));
                             code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(z.to_string()), target])));
                         }
+                    } else {
+                        code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target.clone()])));
+                        code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(z.to_string()), target])));
                     }
-                    _ => panic!("uncover"),
                 }
-            },
-            Prim(neg, box [e]) if neg.as_str() == "-" => {
-                match e {
-                    Int(n) => {
-                        code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target.clone()])) );
-                        code.push( x86::Instr("negq".to_string(), Box::new([target])));
-                    },
-                    Var(y) => {
-                        code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target.clone()])) );
-                        code.push( x86::Instr("negq".to_string(), Box::new([target])));
-                    },
-                    _ => panic!("bad syntax!"),
-                };
-            },
-            _ => panic!("Invalid form for assignment!"),
+                _ => panic!("uncover"),
+            }
+        },
+        Prim(neg, box [e]) if neg.as_str() == "-" => {
+            match e {
+                Int(n) => {
+                    code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target.clone()])) );
+                    code.push( x86::Instr("negq".to_string(), Box::new([target])));
+                },
+                Var(y) => {
+                    code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target.clone()])) );
+                    code.push( x86::Instr("negq".to_string(), Box::new([target])));
+                },
+                _ => panic!("bad syntax!"),
+            };
+        },
+        _ => panic!("Invalid form for assignment!"),
         };
 }
 
@@ -308,15 +308,21 @@ pub fn patch_instructions(block: x86Block) -> x86Block {
 use std::io::Write;
 use std::fs::File;
 pub fn print_x86(block: x86Block, filename: &str) -> std::io::Result<()> {
+    let prelude = build_prelude(block.stack_space, &block.name);
+    let conclusion = build_conclusion(block.stack_space);
+
     let mut file = File::create(filename)?;
+    print_globl_entry(&mut file)?;
+    print_block(prelude, &mut file)?;
     print_block(block, &mut file)?;
+    print_block(conclusion, &mut file)?;
     return Ok(()); 
 }
 
 fn print_block(block: x86Block, file: &mut File) -> std::io::Result<()> {
     let x86Block { locals, instructions, stack_space, name } = block;
     file.write(name.as_bytes())?;
-    file.write(b":")?;
+    file.write(b":\n")?;
     print_instructions(instructions, file)?;
     Ok(())
 }
@@ -324,7 +330,7 @@ fn print_block(block: x86Block, file: &mut File) -> std::io::Result<()> {
 fn print_instructions(instructions: Vec<x86>, file: &mut File) -> std::io::Result<()> {
     use x86::*;
     for instr in instructions.into_iter() {
-        let code = format!("    {}", instr);
+        let code = format!("    {}\n", instr);
         file.write(code.as_bytes())?;
     }
     return Ok(());
@@ -332,16 +338,31 @@ fn print_instructions(instructions: Vec<x86>, file: &mut File) -> std::io::Resul
 
 fn print_globl_entry(file: &mut File) -> std::io::Result<usize> {
     if std::env::consts::OS == "macos" {
-        file.write(b".globl _main")
+        file.write(b".globl _main\n")
     } else {
-        file.write(b".globl main")
+        file.write(b".globl main\n")
     }
 }
 
-// fn build_prelude() -> Vec<x86> {
+fn build_prelude(stack_space: usize, jump_to: &String) -> x86Block {
+    use x86::*;
+    let name = "main".to_string();
+    let instructions = vec![
+        Pushq(Box::new(RBP)),
+        Instr("movq".to_string(), Box::new([RSP, RBP])),
+        Instr("subq".to_string(), Box::new([Imm(stack_space as i64), RSP])),
+        Jmp(jump_to.to_string()),
+    ];
+    x86Block {name, instructions, stack_space:0, locals: vec![]}
+}
 
-// }
-
-// fn build_conclusion() -> Vec<x86> {
-
-// }
+fn build_conclusion(stack_space: usize) -> x86Block {
+    use x86::*;
+    let name = "conclusion".to_string();
+    let instructions = vec![
+        Instr("addq".to_string(), Box::new([Imm(stack_space as i64), RSP])),
+        Popq(Box::new(RBP)),
+        Retq,
+    ];
+    x86Block {name, instructions, stack_space:0, locals:vec![]}
+}

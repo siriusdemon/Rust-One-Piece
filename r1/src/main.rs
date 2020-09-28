@@ -32,6 +32,20 @@ fn interp_r1(expr: Expr) -> i64 {
     return interp_exp(&mut env, &expr);
 }
 
-fn main() -> std::io::Result<()> {
+fn compile(expr: &str) -> std::io::Result<()> {
+    use crate::compiler::*;
+    let expr = parse(expr);
+    let mut expr = uniquify(expr);
+    let mut expr = remove_complex_opera(&mut expr);
+    let expr = explicate_control(&mut expr);
+    let expr = select_instruction(expr);
+    let expr = assign_homes(expr);
+    let expr = patch_instructions(expr);
+    print_x86(expr, "r2.asm");
     Ok(())
+}
+
+fn main() -> std::io::Result<()> {
+    let s = "(let (x 10) x)";
+    compile(s)
 }

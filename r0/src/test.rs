@@ -1,12 +1,10 @@
-use crate::parser::{List, Atom, scan, parse};
 use crate::*;
+use crate::parser::*;
 
 #[test]
 fn test_r0() {
-    let p3 = Program {
-        expr: Prim ("+".to_string(), Box::new([ Int(10), Int(32) ]))
-    };
-    let r = interp_r0(&p3);
+    let p3 = Prim2 ("+".to_string(), Box::new(Int(10)), Box::new(Int(32)));
+    let r = interp_exp(p3);
     assert_eq!(r, 42);
 }
 #[test]
@@ -20,19 +18,19 @@ fn test_scan() {
 #[test]
 fn test_parse() {
     let s = "(+ 1 2)";
-    let expr = Prim ("+".to_string(), Box::new([Int(1), Int(2)]));
+    let expr = Prim2 ("+".to_string(), Box::new(Int(1)), Box::new(Int(2)));
     assert_eq!(parse(s), expr);
     let s = "(- 10)";
-    let expr = Prim ("-".to_string(), Box::new([Int(10)]));
+    let expr = Prim1 ("-".to_string(), Box::new(Int(10)));
     assert_eq!(parse(s), expr);
     let s = "(read)";
-    let expr = Prim ("read".to_string(), Box::new([]));
+    let expr = Prim0 ("read".to_string());
     assert_eq!(parse(s), expr);
 }
 #[test]
 fn test_interp() {
     let s = "(+ 1 2)";
     let expr = parse(s);
-    let r = interp_r0(&Program{expr});
+    let r = interp_exp(expr);
     assert_eq!(r, 3);
 }

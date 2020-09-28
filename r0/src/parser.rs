@@ -5,8 +5,7 @@ pub enum Sexpr {
 }
 
 pub use Sexpr::{Atom, List};
-use crate::{Expr, Int, Prim};
-
+use crate::*;
 
 pub fn scan(expr: &str) -> Sexpr {
     let mut stack = vec![];
@@ -28,10 +27,12 @@ pub fn scan(expr: &str) -> Sexpr {
                 // here, start to build the first element to expr
                 nlist.push(List(list));
                 list = nlist;
-                sym.clear();
             }
             _ => (),
         }
+    }    
+    if !sym.is_empty() {
+        return Atom(sym);
     } 
     return list.pop().unwrap();
 }
@@ -44,10 +45,10 @@ pub fn parse_sexpr(sexpr: &Sexpr) -> Expr {
         },
         List(v) => {
             match v.as_slice() {
-                [Atom(op)] if op.as_str() == "read" => Prim ( op.to_string(), Box::new([])),
-                [Atom(op), e] if op.as_str() == "-" => Prim ( op.to_string(), Box::new([parse_sexpr(e)])),
-                [Atom(op), e1, e2] if op.as_str() == "+" => Prim ( op.to_string(), Box::new([parse_sexpr(e1), parse_sexpr(e2)])),
-                _ => panic!(),
+                [Atom(op)] if op.as_str() == "read" => Prim0 ( op.to_string() ),
+                [Atom(op), e] if op.as_str() == "-" => Prim1 ( op.to_string(), Box::new(parse_sexpr(e))),
+                [Atom(op), e1, e2] if op.as_str() == "+" => Prim2 ( op.to_string(), Box::new(parse_sexpr(e1)), Box::new(parse_sexpr(e2))),
+                _ => panic!("Invalid form!"),
             }
         }
     }

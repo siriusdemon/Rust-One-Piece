@@ -1,29 +1,30 @@
-use crate::semantic::Expr::{self, *};
-use crate::semantic::Environment;
+use crate::syntax::Expr::{self, *};
+use crate::syntax::SymTable;
 use crate::helper::gensym;
 use crate::hashmap;
 
 // ---------------------------------- uniquify pass ---------------------------------------------
 // make every variable name unique
+use std::rc::Rc;
 pub fn uniquify(mut expr: Expr) -> Expr {
-    let mut symtable = Environment::new();
-    return uniquify_expr(&mut expr, &mut symtable);
+    let mut symtable = Rc::new(SymTable::new());
+    return uniquify_expr(&mut expr, symtable);
 }
 
-fn uniquify_expr(expr: &mut Expr, symtable: &mut Environment<String, String>) -> Expr {
+fn uniquify_expr(expr: &mut Expr, symtable: Rc<SymTable<String, String>>) -> Expr {
     match expr {
         Var(x) => Var(symtable.lookup(x).to_string()),
         Int(n) => Int(*n),
         Let(box Var(x), box e, box body) => {
             let new_x = gensym();
-            let mut new_symtable = symtable.clone().extend(hashmap!(x.clone() => new_x.clone()));
+            let mut new_symtable = SymTable::<String, String>::extend(hashmap!(x.clone() => new_x.clone()), &symtable);
             let new_e = Box::new(uniquify_expr(e, symtable));
-            let new_body = Box::new(uniquify_expr(body, &mut new_symtable));
+            let new_body = Box::new(uniquify_expr(body, Rc::new(new_symtable)));
             return Let (Box::new(Var(new_x)), new_e, new_body);
         },
         Prim(op, box []) => Prim(op.to_string(), Box::new([])),
         Prim(op, box [e1]) => Prim(op.to_string(), Box::new([ uniquify_expr(e1, symtable)])),
-        Prim(op, box [e1, e2]) => Prim(op.to_string(), Box::new([ uniquify_expr(e1, symtable), 
+        Prim(op, box [e1, e2]) => Prim(op.to_string(), Box::new([ uniquify_expr(e1, Rc::clone(&symtable)), 
                                                                   uniquify_expr(e2, symtable)])),
         _ => panic!("should not reach!"),
     }
@@ -67,7 +68,7 @@ pub fn remove_complex_opera(expr: &mut Expr) -> Expr {
 
 
 // ------------------------------ explicate control ------------------------
-use crate::semantic::{C0, C0Program};
+use crate::syntax::{C0, C0Program};
 pub fn explicate_control(expr: &mut Expr) -> C0Program {
     let expr = let_to_seq(expr);
     let expr = flatten_seq(expr);
@@ -135,7 +136,7 @@ fn collect_vars(mut expr: &C0) -> Vec<C0> {
 }
 
 // ----------------- select instructions -----------------------------------
-use crate::semantic::{x86, x86Block, x86Program};
+use crate::syntax::{x86, x86Block, x86Program};
 pub fn select_instruction(prog: C0Program) -> x86Block {
     let C0Program { locals, mut cfg } = prog;
     let (label, codes_C0) = cfg.pop().unwrap();
@@ -258,18 +259,18 @@ fn align_address(space: usize, align: usize) -> usize {
     if remain == 0 { space } else { space + align - remain }
 }
 
-fn build_symbol_table(locals: &Vec<x86>) -> Environment<&x86, x86> {
+fn build_symbol_table(locals: &Vec<x86>) -> SymTable<&x86, x86> {
     use x86::*;
-    let mut symtable = Environment::new();
+    let mut symtable = SymTable::new();
     for (i, var) in locals.iter().enumerate() {
         symtable.bind(var, Deref(Box::new(RBP), (i+1) as i64 * -8));
     }
     return symtable;
 }
 
-fn assign_homes_helper(instr: Vec<x86>, symtable: &Environment<&x86, x86>) -> Vec<x86> {
+fn assign_homes_helper(instr: Vec<x86>, symtable: &SymTable<&x86, x86>) -> Vec<x86> {
     use x86::*;
-    fn helper(expr: &x86, symtable: &Environment<&x86, x86>) -> x86 {
+    fn helper(expr: &x86, symtable: &SymTable<&x86, x86>) -> x86 {
         match expr {
             Var(x)  => {
                 symtable.map.get(&Var(x.to_string())).unwrap().clone()

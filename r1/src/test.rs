@@ -1,10 +1,10 @@
 use crate::*;
-use crate::semantic::Environment;
+use crate::syntax::SymTable;
 use crate::{hashmap, string};
 use crate::compiler::*;
 #[test]
 fn test_env() {
-    let mut env = Environment::new();
+    let mut env = SymTable::new();
     let (var, val) = (string!("mory"), 100);
     env.bind(var, val);
     let v = env.lookup(&"mory".to_string());
@@ -12,11 +12,9 @@ fn test_env() {
 }
 #[test]
 fn test_env2() {
-    let mut env = Environment::new();
-    let (var, val) = (string!("mory"), 100);
-    env.bind(var, val);
+    let mut env = Rc::new(SymTable::new());
     let map = hashmap!(string!("Jenny") => 100, string!("Good") => 42);
-    let env2 = env.extend(map);
+    let env2 = SymTable::<String, i64>::extend(map, &env);
     let v = env2.lookup(&"Jenny".to_string());
     assert_eq!(*v, 100);
 }
@@ -126,7 +124,7 @@ fn test_remove_complex_opera() {
     }
     assert_eq!(interp_r1(exp), 2);
 }
-use crate::semantic::{C0Program, C0};
+use crate::syntax::{C0Program, C0};
 #[test]
 fn test_explicate_control() {
     use C0::*;
@@ -141,7 +139,7 @@ fn test_explicate_control() {
         panic!("explicate_control fails in C0Program expand");
     }
 }
-use crate::semantic::{x86, x86Block, x86Program};
+use crate::syntax::{x86, x86Block, x86Program};
 #[test]
 fn test_select_instruction() {
     use x86::*;

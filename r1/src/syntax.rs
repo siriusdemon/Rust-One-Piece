@@ -14,20 +14,17 @@ pub struct Program {
 
 use std::collections::HashMap;
 use std::rc::Rc;
-
-
-// when I have time, when I reborn again, may I should pay a moment to this problem.
 use std::hash::Hash;
 
-#[derive(Clone, Debug)]
-pub struct Environment<T, H> where T: Eq + Hash, H: Eq + Hash {
+#[derive(Debug)]
+pub struct SymTable<T, H> where T: Eq + Hash, H: Eq + Hash {
     pub map: HashMap<T, H>,
-    env: Option<Rc<Environment<T, H>>>,
+    env: Option<Rc<SymTable<T, H>>>,
 }
 
-impl<T, H> Environment<T, H> where T: Eq + Hash, H: Eq + Hash {
+impl<T, H> SymTable<T, H> where T: Eq + Hash, H: Eq + Hash {
     pub fn new() -> Self {
-        Environment {
+        SymTable {
             map: HashMap::new(),
             env: None
         }
@@ -46,8 +43,8 @@ impl<T, H> Environment<T, H> where T: Eq + Hash, H: Eq + Hash {
         return self.map.insert(var, val); 
     }
 
-    pub fn extend(self, map: HashMap<T, H>) -> Self {
-        Environment { map, env: Some(Rc::new(self)) }
+    pub fn extend(map: HashMap<T, H>, table: &Rc<SymTable<T,H>>) -> Self {
+        SymTable { map, env: Some(Rc::clone(table)) }
     }
 }
 

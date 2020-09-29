@@ -6,7 +6,7 @@ pub enum Sexpr {
 
 pub use Sexpr::{Atom, List};
 
-use crate::{Expr, Int, Prim0, Prim1, Prim2, Var, Let};
+use crate::*;
 use crate::helper::is_digit;
 use crate::string;
 
@@ -50,7 +50,7 @@ pub fn parse_sexpr(sexpr: &Sexpr) -> Expr {
         Atom(s) => if is_digit(s) { Int(s.parse().unwrap())} else { Var(s.to_string()) }
         List(v) => match v.as_slice() {
             // let expression
-            [Atom(_let), List(bind), exp] if _let.as_str() == "let" => {
+            [Atom(op), List(bind), exp] if op.as_str() == "let" => {
                 match bind.as_slice() {
                     [Atom(var), val] if !is_digit(var) => {
                         Let( Box::new(Var(var.to_string())), Box::new(parse_sexpr(val)), Box::new(parse_sexpr(exp)) )

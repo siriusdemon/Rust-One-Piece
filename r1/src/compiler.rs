@@ -22,10 +22,10 @@ fn uniquify_expr(expr: &mut Expr, symtable: Rc<SymTable<String, String>>) -> Exp
             let new_body = Box::new(uniquify_expr(body, Rc::new(new_symtable)));
             return Let (Box::new(Var(new_x)), new_e, new_body);
         },
-        Prim(op, box []) => Prim(op.to_string(), Box::new([])),
-        Prim(op, box [e1]) => Prim(op.to_string(), Box::new([ uniquify_expr(e1, symtable)])),
-        Prim(op, box [e1, e2]) => Prim(op.to_string(), Box::new([ uniquify_expr(e1, Rc::clone(&symtable)), 
-                                                                  uniquify_expr(e2, symtable)])),
+        Prim0(op) => Prim0(op.to_string()),
+        Prim1(op, box e1) => Prim1(op.to_string(), Box::new( uniquify_expr(e1, symtable))),
+        Prim2(op, box e1, box e2) => Prim2(op.to_string(), Box::new(uniquify_expr(e1, Rc::clone(&symtable))), 
+                                                          Box::new(uniquify_expr(e2, symtable))),
         _ => panic!("should not reach!"),
     }
 }
@@ -33,39 +33,45 @@ fn uniquify_expr(expr: &mut Expr, symtable: Rc<SymTable<String, String>>) -> Exp
 // ---------------------------------- remove complex operands pass ----------------------------------
 use std::mem;
 pub fn remove_complex_opera(expr: &mut Expr) -> Expr {
-    let any_prim = Prim(String::new(), Box::new([]));
     match expr {
         Var(x) => Var(x.to_string()),
         Int(n) => Int(*n),
         Let(box Var(x), box e, box body) => {
             Let ( Box::new(Var(x.to_string())), Box::new( remove_complex_opera(e) ), Box::new( remove_complex_opera(body) ))
         },
-        Prim(op, box []) => Prim(op.to_string(), Box::new([])),
-        Prim(op, box [e]) => {
-            if mem::discriminant(e) == mem::discriminant(&any_prim) {
+        Prim0(op) => Prim0(op.to_string()),
+        Prim1(op, box e) => {
+            if is_prim1_or_prim2(e) {
                 let x = gensym();
-                Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e)), Box::new(Prim(op.to_string(), Box::new([Var(x)]))))
+                Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e)), Box::new(Prim1(op.to_string(), Box::new(Var(x)))))
             } else {
-                Prim(op.to_string(), Box::new([ remove_complex_opera(e) ]))
+                Prim1(op.to_string(), Box::new( remove_complex_opera(e) ))
             }
         },
-        Prim(op, box [e1, e2]) => {
-            if mem::discriminant(e1) == mem::discriminant(&any_prim) {
+        Prim2(op, box e1, box e2) => {
+            if is_prim1_or_prim2(e1) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e1)), 
-                    Box::new(Prim(op.to_string(), Box::new([Var(x), remove_complex_opera(e2)]))))
-            } else if mem::discriminant(e2) == mem::discriminant(&any_prim) {
+                    Box::new(Prim2(op.to_string(), Box::new(Var(x)), Box::new(remove_complex_opera(e2)))))
+            } else if is_prim1_or_prim2(e2) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e2)), 
-                    Box::new(Prim(op.to_string(), Box::new([remove_complex_opera(e1), Var(x)]))))
+                    Box::new(Prim2(op.to_string(), Box::new(remove_complex_opera(e1)), Box::new(Var(x)))))
             } else {
-                Prim(op.to_string(), Box::new( [remove_complex_opera(e1), remove_complex_opera(e2)] ))
+                Prim2(op.to_string(), Box::new( remove_complex_opera(e1)), Box::new(remove_complex_opera(e2) ))
             }
         },
         _ => panic!("should not reach!"),
     }
 }
 
+
+fn is_prim1_or_prim2(expr: &Expr) -> bool {
+    let any_prim1 = Prim1(String::new(), Box::new(Int(1)));
+    let any_prim2 = Prim2(String::new(), Box::new(Int(1)), Box::new(Int(1)));
+    mem::discriminant(expr) == mem::discriminant(&any_prim1) ||
+    mem::discriminant(expr) == mem::discriminant(&any_prim2)
+}
 
 // ------------------------------ explicate control ------------------------
 use crate::syntax::{C0, C0Program};
@@ -81,12 +87,12 @@ pub fn let_to_seq(expr: &mut Expr) -> C0 {
     match expr {
         Int(n) => C0::Int(*n),
         Var(x) => C0::Var(x.to_string()),
-        Prim(op, box []) => C0::Prim(op.to_string(), Box::new([])),
-        Prim(op, box [e]) => C0::Prim(op.to_string(), Box::new([ let_to_seq(e) ])),
-        Prim(op, box [e1, e2]) => {
+        Prim0(op) => C0::Prim0(op.to_string()),
+        Prim1(op, box e) => C0::Prim1(op.to_string(), Box::new( let_to_seq(e) )),
+        Prim2(op, box e1, box e2) => {
             let e1 = let_to_seq(e1);
             let e2 = let_to_seq(e2);
-            C0::Prim(op.to_string(), Box::new([e1, e2]))
+            C0::Prim2(op.to_string(), Box::new(e1), Box::new(e2))
         },
         Let(box Var(x), box e, box body) => {
             let assign = C0::Assign(Box::new(C0::Var(x.to_string())), Box::new(let_to_seq(e)));
@@ -171,58 +177,58 @@ pub fn C0_to_x86_helper(expr: &C0, code: &mut Vec<x86>) {
 fn assign_helper(source: &C0, target: x86, code: &mut Vec<x86>) {
     use C0::*;
     match source {
-        Int(n) => code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target]))),
-        Var(y) => code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target]))),
-        Prim(read, box []) if read.as_str() == "read" => {
+        Int(n) => code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(*n)), Box::new(target))),
+        Var(y) => code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target))),
+        Prim0(read) if read.as_str() == "read" => {
             code.push( x86::Callq("read_int".to_string()));
-            code.push( x86::Instr("movq".to_string(), Box::new([x86::RAX, target])));
+            code.push( x86::Op2("movq".to_string(), Box::new(x86::RAX), Box::new(target)));
         },
-        Prim(add, box [e1, e2]) if add.as_str() == "+" => {
+        Prim2(add, box e1, box e2) if add.as_str() == "+" => {
             match (e1, e2) {
                 (Int(n1), Int(n2)) => {
-                    code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n1), target.clone()])));
-                    code.push( x86::Instr("addq".to_string(), Box::new([x86::Imm(*n2), target])));
+                    code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(*n1)), Box::new(target.clone())));
+                    code.push( x86::Op2("addq".to_string(), Box::new(x86::Imm(*n2)), Box::new(target)));
                 },
                 (Var(y), Int(n)) | (Int(n), Var(y)) => {
                     if let x86::Var(x) = &target {
                         if y.as_str() == x.as_str() {
-                            code.push( x86::Instr("addq".to_string(), Box::new([x86::Imm(*n), target])));
+                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Imm(*n)), Box::new(target)));
                         } else {
-                            code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target.clone()])));
-                            code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(y.to_string()), target])));
+                            code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(*n)), Box::new(target.clone())));
+                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target)));
                         }
                     } else {
-                        code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target.clone()])));
-                        code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(y.to_string()), target])));
+                        code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(*n)), Box::new(target.clone())));
+                        code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target)));
                     }
                 },
                 (Var(y), Var(z)) => {
                     if let x86::Var(x) = &target {
                         if y.as_str() == x.as_str() {
-                            code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(z.to_string()), target])));
+                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z.to_string())), Box::new(target)));
                         } else if z.as_str() == x.as_str() {
-                            code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(y.to_string()), target])));
+                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target)));
                         } else {
-                            code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target.clone()])));
-                            code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(z.to_string()), target])));
+                            code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target.clone())));
+                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z.to_string())), Box::new(target)));
                         }
                     } else {
-                        code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target.clone()])));
-                        code.push( x86::Instr("addq".to_string(), Box::new([x86::Var(z.to_string()), target])));
+                        code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target.clone())));
+                        code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z.to_string())), Box::new(target)));
                     }
                 }
                 _ => panic!("uncover"),
             }
         },
-        Prim(neg, box [e]) if neg.as_str() == "-" => {
+        Prim1(neg, box e) if neg.as_str() == "-" => {
             match e {
                 Int(n) => {
-                    code.push( x86::Instr("movq".to_string(), Box::new([x86::Imm(*n), target.clone()])) );
-                    code.push( x86::Instr("negq".to_string(), Box::new([target])));
+                    code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(*n)), Box::new(target.clone())) );
+                    code.push( x86::Op1("negq".to_string(), Box::new(target)));
                 },
                 Var(y) => {
-                    code.push( x86::Instr("movq".to_string(), Box::new([x86::Var(y.to_string()), target.clone()])) );
-                    code.push( x86::Instr("negq".to_string(), Box::new([target])));
+                    code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target.clone())) );
+                    code.push( x86::Op1("negq".to_string(), Box::new(target)));
                 },
                 _ => panic!("bad syntax!"),
             };
@@ -275,11 +281,11 @@ fn assign_homes_helper(instr: Vec<x86>, symtable: &SymTable<&x86, x86>) -> Vec<x
             Var(x)  => {
                 symtable.map.get(&Var(x.to_string())).unwrap().clone()
             },
-            Instr(op, box [e]) => {
-                Instr(op.to_string(), Box::new([helper(e, symtable)]))
+            Op1(op, box e) => {
+                Op1(op.to_string(), Box::new(helper(e, symtable)))
             },
-            Instr(op, box [e1, e2]) => {
-                Instr(op.to_string(), Box::new([helper(e1, symtable), helper(e2, symtable)]))
+            Op2(op, box e1, box e2) => {
+                Op2(op.to_string(), Box::new(helper(e1, symtable)), Box::new(helper(e2, symtable)))
             },
             e => e.clone()
         }
@@ -295,9 +301,9 @@ pub fn patch_instructions(block: x86Block) -> x86Block {
     let mut new_instructions = vec![];
     for instr in instructions.iter() {
         match instr {
-            Instr(movq, box [Deref(box reg1, n1), Deref(box reg2, n2)]) => {
-                new_instructions.push( Instr(movq.to_string(), Box::new([ Deref(Box::new(reg1.clone()), *n1), RAX ])) );
-                new_instructions.push( Instr(movq.to_string(), Box::new([ RAX, Deref(Box::new(reg2.clone()), *n2) ])) );
+            Op2(movq, box Deref(box reg1, n1), box Deref(box reg2, n2)) => {
+                new_instructions.push( Op2(movq.to_string(), Box::new(Deref(Box::new(reg1.clone()), *n1)), Box::new(RAX)));
+                new_instructions.push( Op2(movq.to_string(), Box::new(RAX), Box::new(Deref(Box::new(reg2.clone()), *n2))));
             },
             e => new_instructions.push( e.clone() ),
         }
@@ -350,8 +356,8 @@ fn build_prelude(stack_space: usize, jump_to: &String) -> x86Block {
     let name = "main".to_string();
     let instructions = vec![
         Pushq(Box::new(RBP)),
-        Instr("movq".to_string(), Box::new([RSP, RBP])),
-        Instr("subq".to_string(), Box::new([Imm(stack_space as i64), RSP])),
+        Op2("movq".to_string(), Box::new(RSP), Box::new(RBP)),
+        Op2("subq".to_string(), Box::new(Imm(stack_space as i64)), Box::new(RSP)),
         Jmp(jump_to.to_string()),
     ];
     x86Block {name, instructions, stack_space:0, locals: vec![]}
@@ -361,7 +367,7 @@ fn build_conclusion(stack_space: usize) -> x86Block {
     use x86::*;
     let name = "conclusion".to_string();
     let instructions = vec![
-        Instr("addq".to_string(), Box::new([Imm(stack_space as i64), RSP])),
+        Op2("addq".to_string(), Box::new(Imm(stack_space as i64)), Box::new(RSP)),
         Popq(Box::new(RBP)),
         Retq,
     ];

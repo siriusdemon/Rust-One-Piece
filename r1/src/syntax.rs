@@ -3,7 +3,9 @@ pub enum Expr {
     Int ( i64 ),
     Var ( String ),
     Let ( Box<Expr>, Box<Expr>,  Box<Expr> ),
-    Prim ( String, Box<[Expr]> ),
+    Prim0 ( String ),
+    Prim1 ( String, Box<Expr> ),
+    Prim2 ( String, Box<Expr>, Box<Expr> ),
 }
 
 #[derive(Debug)]
@@ -54,7 +56,9 @@ impl<T, H> SymTable<T, H> where T: Eq + Hash, H: Eq + Hash {
 pub enum C0 {
     Int(i64),
     Var(String),
-    Prim(String, Box<[C0]>),
+    Prim0(String),
+    Prim1(String, Box<C0>),
+    Prim2(String, Box<C0>, Box<C0>),
     Assign(Box<C0>, Box<C0>),
     Return(Box<C0>),
     Seq(Box<C0>, Box<C0>),
@@ -74,7 +78,8 @@ pub enum x86 {
     Imm(i64),
     Var(String),
     Deref(Box<x86>, i64),
-    Instr(String, Box<[x86]>),
+    Op1(String, Box<x86>),
+    Op2(String, Box<x86>, Box<x86>),
     Callq(String),
     Retq,
     Pushq(Box<x86>),
@@ -106,8 +111,8 @@ impl fmt::Display for x86 {
             R12 => write!(f, "%r12"), R13 => write!(f, "%r13"), R14 => write!(f, "%r14"), R15 => write!(f, "%r15"),
             Imm(n) => write!(f, "${}", n),
             Deref(box reg, n) => write!(f, "{}({})", n, reg),
-            Instr(op, box [e]) => write!(f, "{} {}", op, e),
-            Instr(op, box [e1, e2]) => write!(f, "{} {}, {}", op, e1, e2),
+            Op1(op, box e) => write!(f, "{} {}", op, e),
+            Op2(op, box e1, box e2) => write!(f, "{} {}, {}", op, e1, e2),
             Callq(function) => write!(f, "callq {}", function),
             Retq => write!(f, "retq"),
             Pushq(box reg) => write!(f, "pushq {}", reg),

@@ -6,7 +6,7 @@ pub enum Sexpr {
 
 pub use Sexpr::{Atom, List};
 
-use crate::{Expr, Int, Prim, Var, Let};
+use crate::{Expr, Int, Prim0, Prim1, Prim2, Var, Let};
 use crate::helper::is_digit;
 use crate::string;
 
@@ -59,9 +59,9 @@ pub fn parse_sexpr(sexpr: &Sexpr) -> Expr {
                 }
             },
             // prim
-            [Atom(_add), e1, e2] if _add.as_str() == "+" => Prim ( string!("+"), Box::new( [parse_sexpr(e1), parse_sexpr(e2)] )),
-            [Atom(_sub), e] if _sub.as_str() == "-" => Prim ( string!("-"), Box::new( [parse_sexpr(e)] )),
-            [Atom(_read)] if _read.as_str() == "read" => Prim ( string!("read"), Box::new([])),
+            [Atom(op), e1, e2] if op.as_str() == "+"    => Prim2 ( string!("+"), Box::new( parse_sexpr(e1)), Box::new(parse_sexpr(e2))),
+            [Atom(op), e]      if op.as_str() == "-"    => Prim1 ( string!("-"), Box::new( parse_sexpr(e))),
+            [Atom(op)]         if op.as_str() == "read" => Prim0 ( string!("read")),
             _ => panic!("Bad syntax!"),
         }
     }

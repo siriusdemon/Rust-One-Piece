@@ -2,6 +2,8 @@ use crate::*;
 use crate::syntax::SymTable;
 use crate::{hashmap, string};
 use crate::compiler::*;
+use crate::parser::parse;
+
 #[test]
 fn test_env() {
     let mut env = SymTable::new();
@@ -20,27 +22,27 @@ fn test_env2() {
 }
 #[test]
 fn test_let() {
-    let exp = Let(Box::new(Var(string!("x"))), Box::new(Int(8)), Box::new(Prim(string!("+"), Box::new([Var(string!("x")), Int(34)]))));
+    let exp = Let(Box::new(Var(string!("x"))), Box::new(Int(8)), Box::new(Prim2(string!("+"), Box::new(Var(string!("x"))), Box::new(Int(34)))));
     assert_eq!(42, interp_r1(exp));
 }
 #[test]
 fn test_nest_let() {
     let exp = Let(Box::new(Var(string!("x"))), Box::new(Int(8)), 
-                Box::new(Let(Box::new(Var(string!("y"))), Box::new(Int(34)), Box::new(Prim(string!("+"), Box::new([Var(string!("x")), Var(string!("y"))]))))));
+                Box::new(Let(Box::new(Var(string!("y"))), Box::new(Int(34)), Box::new(Prim2(string!("+"), Box::new(Var(string!("x"))), Box::new(Var(string!("y"))))))));
     assert_eq!(42, interp_r1(exp));
 }
 #[test]
 fn test_parser() {
     let e = "(let (x 8) (let (y 34) (+ x y)))";
     let exp = Let(Box::new(Var(string!("x"))), Box::new(Int(8)), 
-                Box::new(Let(Box::new(Var(string!("y"))), Box::new(Int(34)), Box::new(Prim(string!("+"), Box::new([Var(string!("x")), Var(string!("y"))]))))));
+                Box::new(Let(Box::new(Var(string!("y"))), Box::new(Int(34)), Box::new(Prim2(string!("+"), Box::new(Var(string!("x"))), Box::new(Var(string!("y"))))))));
     let res = parse(e);
     assert_eq!(exp, res);
 }
 #[test]
 fn test_parser_read() {
     let e = "(read)";
-    let exp = Prim ( string!("read"), Box::new([]));
+    let exp = Prim0 ( string!("read"));
     let res = parse(e);
     assert_eq!(exp, res);
 }
@@ -100,7 +102,7 @@ fn test_uniquify() {
             (+ x 2))";
     let exp = parse(e);
     let exp = uniquify(exp);
-    if let Let(box Var(x1), box Let(box Var(x2), _i1, box Prim(_add, box [Var(x2_), _i2])), box Prim(_add1, box [Var(x1_), _i3])) = &exp {
+    if let Let(box Var(x1), box Let(box Var(x2), _i1, box Prim2(_add, box Var(x2_), box _i2)), box Prim2(_add1, box Var(x1_), box _i3)) = &exp {
         assert_eq!(x1, x1_);
         assert_eq!(x2, x2_);
         assert_ne!(x1, x2);
@@ -115,7 +117,7 @@ fn test_remove_complex_opera() {
     let e = "(+ 10 (- 8))";
     let mut exp = parse(e);
     let exp = remove_complex_opera(&mut exp);
-    if let Let(box Var(x), box Prim(_sub, box [Int(n)]), box Prim(_add, box [Int(n1), Var(x1)])) = &exp {
+    if let Let(box Var(x), box Prim1(_sub, box Int(n)), box Prim2(_add, box Int(n1), box Var(x1))) = &exp {
         assert_eq!(x, x1);
         assert_eq!(n, &8);
         assert_eq!(n1, &10);
@@ -134,7 +136,7 @@ fn test_explicate_control() {
     let exp = explicate_control(&mut exp);
     if let C0Program { locals, cfg: mut blocks } = exp {
         let (label, codes) = blocks.pop().unwrap();
-        assert!(matches!(&codes, Seq(box Assign(box Var(x), box Prim(add, box [Int(n1), Int(n2)])), box Return(box Var(x_))) if x == x_));
+        assert!(matches!(&codes, Seq(box Assign(box Var(x), box Prim2(add, box Int(n1), box Int(n2))), box Return(box Var(x_))) if x == x_));
     } else {
         panic!("explicate_control fails in C0Program expand");
     }
@@ -170,11 +172,11 @@ fn test_assign_homes() {
     let x86Block { locals, instructions, stack_space, name } = block;
     match instructions.as_slice() {
         [mov1, mov2, mov3, _jump] => {
-            assert!(matches!(mov1, Instr(mov, box [Imm(n), Deref(box reg, disp)]) 
+            assert!(matches!(mov1, Op2(mov, box Imm(n), box Deref(box reg, disp)) 
                                     if mov.as_str() == "movq" && *n == 42 && *reg == x86::RBP && *disp == -8));
-            assert!(matches!(mov2, Instr(mov, box [Deref(box reg1, disp1), Deref(box reg2, disp2)]) 
+            assert!(matches!(mov2, Op2(mov, box Deref(box reg1, disp1), box Deref(box reg2, disp2)) 
                                     if mov.as_str() == "movq" && reg1 == reg2 && *disp1 == -8 && *disp2 == -16));
-            assert!(matches!(mov3, Instr(mov, box [Deref(box reg, disp), rax]) 
+            assert!(matches!(mov3, Op2(mov, box Deref(box reg, disp), box rax) 
                                     if mov.as_str() == "movq" && *reg == x86::RBP && *disp == -16 && *rax == x86::RAX));
         },
         _ => panic!("test assign_home fails"),
@@ -196,9 +198,9 @@ fn test_patch_instructions() {
     let x86Block { locals, instructions, stack_space, name } = block;
     match instructions.as_slice() {
         [_mov1, mov2, mov3, _mov4, _jump] => {
-            assert!(matches!(mov2, Instr(mov, box [Deref(box reg1, disp1), rax]) 
+            assert!(matches!(mov2, Op2(mov, box Deref(box reg1, disp1), box rax) 
                                     if mov.as_str() == "movq"  && *rax == x86::RAX));
-            assert!(matches!(mov3, Instr(mov, box [rax, Deref(box reg, disp)]) 
+            assert!(matches!(mov3, Op2(mov, box rax, box Deref(box reg, disp)) 
                                     if mov.as_str() == "movq" && *reg == x86::RBP && *disp == -16 && *rax == x86::RAX));
         },
         _ => panic!("test assign_home fails"),
@@ -211,7 +213,7 @@ fn test_x86_display() {
     assert_eq!(format!("{}", n), "$10");
     let deref = x86::Deref(Box::new(x86::RBP), 10);
     assert_eq!(format!("{}", deref), "10(%rbp)");
-    let instr = x86::Instr("movq".to_string(), Box::new([n, deref]));
+    let instr = x86::Op2("movq".to_string(), Box::new(n), Box::new(deref));
     assert_eq!(format!("{}", instr), "movq $10, 10(%rbp)");
 
     let call = x86::Callq("read_int".to_string());

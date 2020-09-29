@@ -17,7 +17,7 @@ fn uniquify_expr(expr: Expr, symtable: Rc<SymTable<String, String>>) -> Expr {
         Int(n) => Int(n),
         Let(box Var(x), box e, box body) => {
             let new_x = gensym();
-            let mut new_symtable: SymTable<String, String> = SymTable::extend(hashmap!(x => new_x.clone()), &symtable);
+            let new_symtable: SymTable<String, String> = SymTable::extend(hashmap!(x => new_x.clone()), &symtable);
             let new_e = Box::new(uniquify_expr(e, symtable));
             let new_body = Box::new(uniquify_expr(body, Rc::new(new_symtable)));
             return Let (Box::new(Var(new_x)), new_e, new_body);

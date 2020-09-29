@@ -62,7 +62,7 @@ pub fn parse_sexpr(sexpr: &Sexpr) -> Expr {
             [Atom(op), e1, e2] if op.as_str() == "+"    => Prim2 ( string!("+"), Box::new( parse_sexpr(e1)), Box::new(parse_sexpr(e2))),
             [Atom(op), e]      if op.as_str() == "-"    => Prim1 ( string!("-"), Box::new( parse_sexpr(e))),
             [Atom(op)]         if op.as_str() == "read" => Prim0 ( string!("read")),
-            _ => panic!("Bad syntax!"),
+            _ => panic!("Invalid syntax!"),
         }
     }
 }

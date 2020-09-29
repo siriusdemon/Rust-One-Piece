@@ -14,7 +14,7 @@ fn test_env() {
 }
 #[test]
 fn test_env2() {
-    let mut env = Rc::new(SymTable::new());
+    let env = Rc::new(SymTable::new());
     let map = hashmap!(string!("Jenny") => 100, string!("Good") => 42);
     let env2 = SymTable::<String, i64>::extend(map, &env);
     let v = env2.lookup(&"Jenny".to_string());
@@ -115,8 +115,8 @@ fn test_uniquify() {
 #[test]
 fn test_remove_complex_opera() {
     let e = "(+ 10 (- 8))";
-    let mut exp = parse(e);
-    let exp = remove_complex_opera(&mut exp);
+    let exp = parse(e);
+    let exp = remove_complex_opera(exp);
     if let Let(box Var(x), box Prim1(_sub, box Int(n)), box Prim2(_add, box Int(n1), box Var(x1))) = &exp {
         assert_eq!(x, x1);
         assert_eq!(n, &8);
@@ -132,14 +132,11 @@ fn test_explicate_control() {
     use C0::*;
     let e = "(let (x (+ 1 2))
                 x)";
-    let mut exp = parse(e);
-    let exp = explicate_control(&mut exp);
-    if let C0Program { locals, cfg: mut blocks } = exp {
-        let (label, codes) = blocks.pop().unwrap();
-        assert!(matches!(&codes, Seq(box Assign(box Var(x), box Prim2(add, box Int(n1), box Int(n2))), box Return(box Var(x_))) if x == x_));
-    } else {
-        panic!("explicate_control fails in C0Program expand");
-    }
+    let exp = parse(e);
+    let exp = explicate_control(exp);
+    let C0Program { locals, cfg: mut blocks } = exp;
+    let (label, codes) = blocks.pop().unwrap();
+    assert!(matches!(&codes, Seq(box Assign(box Var(x), box Prim2(add, box Int(n1), box Int(n2))), box Return(box Var(x_))) if x == x_));
 }
 use crate::syntax::{x86, x86Block, x86Program};
 #[test]
@@ -148,9 +145,9 @@ fn test_select_instruction() {
     let e = "(let (a 42)
                 (let (b a)
                     b))";
-    let mut exp = parse(e);
-    let mut exp = remove_complex_opera(&mut exp);
-    let exp = explicate_control(&mut exp);
+    let exp = parse(e);
+    let exp = remove_complex_opera(exp);
+    let exp = explicate_control(exp);
     let block = select_instruction(exp);
     let x86Block { locals, instructions, stack_space, name } = block;
     match instructions.as_slice() {
@@ -164,9 +161,9 @@ fn test_assign_homes() {
     let e = "(let (a 42)
                 (let (b a)
                     b))";
-    let mut exp = parse(e);
-    let mut exp = remove_complex_opera(&mut exp);
-    let exp = explicate_control(&mut exp);
+    let exp = parse(e);
+    let exp = remove_complex_opera(exp);
+    let exp = explicate_control(exp);
     let block = select_instruction(exp);
     let block = assign_homes(block);
     let x86Block { locals, instructions, stack_space, name } = block;
@@ -189,9 +186,9 @@ fn test_patch_instructions() {
     let e = "(let (a 42)
                 (let (b a)
                     b))";
-    let mut exp = parse(e);
-    let mut exp = remove_complex_opera(&mut exp);
-    let exp = explicate_control(&mut exp);
+    let exp = parse(e);
+    let exp = remove_complex_opera(exp);
+    let exp = explicate_control(exp);
     let block = select_instruction(exp);
     let block = assign_homes(block);
     let block = patch_instructions(block);

@@ -6,59 +6,59 @@ use crate::hashmap;
 // ---------------------------------- uniquify pass ---------------------------------------------
 // make every variable name unique
 use std::rc::Rc;
-pub fn uniquify(mut expr: Expr) -> Expr {
-    let mut symtable = Rc::new(SymTable::new());
-    return uniquify_expr(&mut expr, symtable);
+pub fn uniquify(expr: Expr) -> Expr {
+    let symtable = Rc::new(SymTable::new());
+    return uniquify_expr(expr, symtable);
 }
 
-fn uniquify_expr(expr: &mut Expr, symtable: Rc<SymTable<String, String>>) -> Expr {
+fn uniquify_expr(expr: Expr, symtable: Rc<SymTable<String, String>>) -> Expr {
     match expr {
-        Var(x) => Var(symtable.lookup(x).to_string()),
-        Int(n) => Int(*n),
+        Var(x) => Var(symtable.lookup(&x).to_string()),
+        Int(n) => Int(n),
         Let(box Var(x), box e, box body) => {
             let new_x = gensym();
-            let mut new_symtable = SymTable::<String, String>::extend(hashmap!(x.clone() => new_x.clone()), &symtable);
+            let mut new_symtable: SymTable<String, String> = SymTable::extend(hashmap!(x => new_x.clone()), &symtable);
             let new_e = Box::new(uniquify_expr(e, symtable));
             let new_body = Box::new(uniquify_expr(body, Rc::new(new_symtable)));
             return Let (Box::new(Var(new_x)), new_e, new_body);
         },
-        Prim0(op) => Prim0(op.to_string()),
-        Prim1(op, box e1) => Prim1(op.to_string(), Box::new( uniquify_expr(e1, symtable))),
-        Prim2(op, box e1, box e2) => Prim2(op.to_string(), Box::new(uniquify_expr(e1, Rc::clone(&symtable))), 
-                                                          Box::new(uniquify_expr(e2, symtable))),
+        Prim0(op) => Prim0(op),
+        Prim1(op, box e1) => Prim1(op, Box::new( uniquify_expr(e1, symtable))),
+        Prim2(op, box e1, box e2) => Prim2(op, Box::new(uniquify_expr(e1, Rc::clone(&symtable))), 
+                                               Box::new(uniquify_expr(e2, symtable))),
         _ => panic!("should not reach!"),
     }
 }
 
 // ---------------------------------- remove complex operands pass ----------------------------------
 use std::mem;
-pub fn remove_complex_opera(expr: &mut Expr) -> Expr {
+pub fn remove_complex_opera(expr: Expr) -> Expr {
     match expr {
-        Var(x) => Var(x.to_string()),
-        Int(n) => Int(*n),
+        Var(x) => Var(x),
+        Int(n) => Int(n),
         Let(box Var(x), box e, box body) => {
-            Let ( Box::new(Var(x.to_string())), Box::new( remove_complex_opera(e) ), Box::new( remove_complex_opera(body) ))
+            Let ( Box::new(Var(x)), Box::new( remove_complex_opera(e) ), Box::new( remove_complex_opera(body) ))
         },
-        Prim0(op) => Prim0(op.to_string()),
+        Prim0(op) => Prim0(op),
         Prim1(op, box e) => {
-            if is_prim1_or_prim2(e) {
+            if is_prim1_or_prim2(&e) {
                 let x = gensym();
-                Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e)), Box::new(Prim1(op.to_string(), Box::new(Var(x)))))
+                Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e)), Box::new(Prim1(op, Box::new(Var(x)))))
             } else {
-                Prim1(op.to_string(), Box::new( remove_complex_opera(e) ))
+                Prim1(op, Box::new( remove_complex_opera(e) ))
             }
         },
         Prim2(op, box e1, box e2) => {
-            if is_prim1_or_prim2(e1) {
+            if is_prim1_or_prim2(&e1) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e1)), 
-                    Box::new(Prim2(op.to_string(), Box::new(Var(x)), Box::new(remove_complex_opera(e2)))))
-            } else if is_prim1_or_prim2(e2) {
+                    Box::new(Prim2(op, Box::new(Var(x)), Box::new(remove_complex_opera(e2)))))
+            } else if is_prim1_or_prim2(&e2) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e2)), 
-                    Box::new(Prim2(op.to_string(), Box::new(remove_complex_opera(e1)), Box::new(Var(x)))))
+                    Box::new(Prim2(op, Box::new(remove_complex_opera(e1)), Box::new(Var(x)))))
             } else {
-                Prim2(op.to_string(), Box::new( remove_complex_opera(e1)), Box::new(remove_complex_opera(e2) ))
+                Prim2(op, Box::new( remove_complex_opera(e1)), Box::new(remove_complex_opera(e2) ))
             }
         },
         _ => panic!("should not reach!"),
@@ -75,7 +75,7 @@ fn is_prim1_or_prim2(expr: &Expr) -> bool {
 
 // ------------------------------ explicate control ------------------------
 use crate::syntax::{C0, C0Program};
-pub fn explicate_control(expr: &mut Expr) -> C0Program {
+pub fn explicate_control(expr: Expr) -> C0Program {
     let expr = let_to_seq(expr);
     let expr = flatten_seq(expr);
     let locals = collect_vars(&expr);
@@ -83,19 +83,15 @@ pub fn explicate_control(expr: &mut Expr) -> C0Program {
 }
 
 
-pub fn let_to_seq(expr: &mut Expr) -> C0 {
+pub fn let_to_seq(expr: Expr) -> C0 {
     match expr {
-        Int(n) => C0::Int(*n),
-        Var(x) => C0::Var(x.to_string()),
-        Prim0(op) => C0::Prim0(op.to_string()),
-        Prim1(op, box e) => C0::Prim1(op.to_string(), Box::new( let_to_seq(e) )),
-        Prim2(op, box e1, box e2) => {
-            let e1 = let_to_seq(e1);
-            let e2 = let_to_seq(e2);
-            C0::Prim2(op.to_string(), Box::new(e1), Box::new(e2))
-        },
+        Int(n) => C0::Int(n),
+        Var(x) => C0::Var(x),
+        Prim0(op) => C0::Prim0(op),
+        Prim1(op, box e) => C0::Prim1(op, Box::new( let_to_seq(e) )),
+        Prim2(op, box e1, box e2) => C0::Prim2(op, Box::new( let_to_seq(e1) ), Box::new( let_to_seq(e2) )),
         Let(box Var(x), box e, box body) => {
-            let assign = C0::Assign(Box::new(C0::Var(x.to_string())), Box::new(let_to_seq(e)));
+            let assign = C0::Assign(Box::new(C0::Var(x)), Box::new(let_to_seq(e)));
             C0::Seq(Box::new(assign), Box::new(let_to_seq(body)))
         }
         _ => panic!("bad syntax"),
@@ -146,22 +142,22 @@ use crate::syntax::{x86, x86Block, x86Program};
 pub fn select_instruction(prog: C0Program) -> x86Block {
     let C0Program { locals, mut cfg } = prog;
     let (label, codes_C0) = cfg.pop().unwrap();
-    let mut instructions = C0_to_x86(&codes_C0);
-    let x86_block = x86Block { instructions, locals: C0info_to_x86info(locals), stack_space: 0, name: "start".to_string() };
+    let instructions = C0_to_x86(codes_C0);
+    let x86_block = x86Block { instructions, locals: vars_c0_to_x86(locals), stack_space: 0, name: "start".to_string() };
     return x86_block;
 }
 
 
-pub fn C0_to_x86(expr: &C0) -> Vec<x86> {
+pub fn C0_to_x86(expr: C0) -> Vec<x86> {
     let mut instr = vec![];
-    C0_to_x86_helper(&expr, &mut instr);
+    C0_to_x86_helper(expr, &mut instr);
     return instr;
 }
 
-pub fn C0_to_x86_helper(expr: &C0, code: &mut Vec<x86>) {
+pub fn C0_to_x86_helper(expr: C0, code: &mut Vec<x86>) {
     use C0::*;
     match expr {
-        Assign(box Var(x), box e) => assign_helper(e, x86::Var(x.to_string()), code),
+        Assign(box Var(x), box e) => assign_helper(e, x86::Var(x), code),
         Return(box e) => {
             assign_helper(e, x86::RAX, code);
             code.push( x86::Jmp("conclusion".to_string()) );
@@ -174,11 +170,11 @@ pub fn C0_to_x86_helper(expr: &C0, code: &mut Vec<x86>) {
     }
 } 
 
-fn assign_helper(source: &C0, target: x86, code: &mut Vec<x86>) {
+fn assign_helper(source: C0, target: x86, code: &mut Vec<x86>) {
     use C0::*;
     match source {
-        Int(n) => code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(*n)), Box::new(target))),
-        Var(y) => code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target))),
+        Int(n) => code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(n)), Box::new(target))),
+        Var(y) => code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y)), Box::new(target))),
         Prim0(read) if read.as_str() == "read" => {
             code.push( x86::Callq("read_int".to_string()));
             code.push( x86::Op2("movq".to_string(), Box::new(x86::RAX), Box::new(target)));
@@ -186,35 +182,35 @@ fn assign_helper(source: &C0, target: x86, code: &mut Vec<x86>) {
         Prim2(add, box e1, box e2) if add.as_str() == "+" => {
             match (e1, e2) {
                 (Int(n1), Int(n2)) => {
-                    code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(*n1)), Box::new(target.clone())));
-                    code.push( x86::Op2("addq".to_string(), Box::new(x86::Imm(*n2)), Box::new(target)));
+                    code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(n1)), Box::new(target.clone())));
+                    code.push( x86::Op2("addq".to_string(), Box::new(x86::Imm(n2)), Box::new(target)));
                 },
                 (Var(y), Int(n)) | (Int(n), Var(y)) => {
                     if let x86::Var(x) = &target {
                         if y.as_str() == x.as_str() {
-                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Imm(*n)), Box::new(target)));
+                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Imm(n)), Box::new(target)));
                         } else {
-                            code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(*n)), Box::new(target.clone())));
-                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target)));
+                            code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(n)), Box::new(target.clone())));
+                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y)), Box::new(target)));
                         }
                     } else {
-                        code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(*n)), Box::new(target.clone())));
-                        code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target)));
+                        code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(n)), Box::new(target.clone())));
+                        code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y)), Box::new(target)));
                     }
                 },
                 (Var(y), Var(z)) => {
                     if let x86::Var(x) = &target {
                         if y.as_str() == x.as_str() {
-                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z.to_string())), Box::new(target)));
+                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z)), Box::new(target)));
                         } else if z.as_str() == x.as_str() {
-                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target)));
+                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y)), Box::new(target)));
                         } else {
-                            code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target.clone())));
-                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z.to_string())), Box::new(target)));
+                            code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y)), Box::new(target.clone())));
+                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z)), Box::new(target)));
                         }
                     } else {
-                        code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target.clone())));
-                        code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z.to_string())), Box::new(target)));
+                        code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y)), Box::new(target.clone())));
+                        code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z)), Box::new(target)));
                     }
                 }
                 _ => panic!("uncover"),
@@ -223,11 +219,11 @@ fn assign_helper(source: &C0, target: x86, code: &mut Vec<x86>) {
         Prim1(neg, box e) if neg.as_str() == "-" => {
             match e {
                 Int(n) => {
-                    code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(*n)), Box::new(target.clone())) );
+                    code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(n)), Box::new(target.clone())) );
                     code.push( x86::Op1("negq".to_string(), Box::new(target)));
                 },
                 Var(y) => {
-                    code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y.to_string())), Box::new(target.clone())) );
+                    code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y)), Box::new(target.clone())) );
                     code.push( x86::Op1("negq".to_string(), Box::new(target)));
                 },
                 _ => panic!("bad syntax!"),
@@ -238,7 +234,7 @@ fn assign_helper(source: &C0, target: x86, code: &mut Vec<x86>) {
 }
 
 
-fn C0info_to_x86info(locals: Vec<C0>) -> Vec<x86> {
+fn vars_c0_to_x86(locals: Vec<C0>) -> Vec<x86> {
     let mut new_vars = vec![];
     for x in locals.iter() {
         if let C0::Var(x) = x {
@@ -252,7 +248,7 @@ fn C0info_to_x86info(locals: Vec<C0>) -> Vec<x86> {
 const FRAME: usize = 16;
 const BYTE: usize = 8;
 pub fn assign_homes(block: x86Block) -> x86Block {
-    let x86Block { mut locals, instructions, stack_space, name} = block;
+    let x86Block { locals, instructions, stack_space, name} = block;
     let stack_space = align_address(locals.len() * BYTE, FRAME);
     let symtable = build_symbol_table(&locals);
     let instructions = assign_homes_helper(instructions, &symtable);
@@ -276,21 +272,15 @@ fn build_symbol_table(locals: &Vec<x86>) -> SymTable<&x86, x86> {
 
 fn assign_homes_helper(instr: Vec<x86>, symtable: &SymTable<&x86, x86>) -> Vec<x86> {
     use x86::*;
-    fn helper(expr: &x86, symtable: &SymTable<&x86, x86>) -> x86 {
+    fn helper(expr: x86, symtable: &SymTable<&x86, x86>) -> x86 {
         match expr {
-            Var(x)  => {
-                symtable.map.get(&Var(x.to_string())).unwrap().clone()
-            },
-            Op1(op, box e) => {
-                Op1(op.to_string(), Box::new(helper(e, symtable)))
-            },
-            Op2(op, box e1, box e2) => {
-                Op2(op.to_string(), Box::new(helper(e1, symtable)), Box::new(helper(e2, symtable)))
-            },
-            e => e.clone()
+            Var(x)  => symtable.map.get(&Var(x.to_string())).unwrap().clone(),
+            Op1(op, box e) => Op1(op.to_string(), Box::new(helper(e, symtable))),
+            Op2(op, box e1, box e2) => Op2(op.to_string(), Box::new(helper(e1, symtable)), Box::new(helper(e2, symtable))),
+            e => e,
         }
     }
-    let instr = instr.iter().map(|e| helper(e, symtable)).collect();
+    let instr = instr.into_iter().map(|e| helper(e, symtable)).collect();
     return instr;
 }
 
@@ -299,13 +289,13 @@ pub fn patch_instructions(block: x86Block) -> x86Block {
     use x86::*;
     let x86Block { locals, instructions, stack_space, name } = block;
     let mut new_instructions = vec![];
-    for instr in instructions.iter() {
+    for instr in instructions.into_iter() {
         match instr {
             Op2(movq, box Deref(box reg1, n1), box Deref(box reg2, n2)) => {
-                new_instructions.push( Op2(movq.to_string(), Box::new(Deref(Box::new(reg1.clone()), *n1)), Box::new(RAX)));
-                new_instructions.push( Op2(movq.to_string(), Box::new(RAX), Box::new(Deref(Box::new(reg2.clone()), *n2))));
+                new_instructions.push( Op2(movq.clone(), Box::new(Deref(Box::new(reg1), n1)), Box::new(RAX)));
+                new_instructions.push( Op2(movq, Box::new(RAX), Box::new(Deref(Box::new(reg2), n2))));
             },
-            e => new_instructions.push( e.clone() ),
+            e => new_instructions.push( e ),
         }
     }
     return x86Block { locals, instructions: new_instructions, stack_space, name };

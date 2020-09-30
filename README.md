@@ -33,3 +33,9 @@
 ### PS
 
 鄙人正在广州寻找（深度学习）编译器开发的工作机会，有木有大佬带呀？
+
+### Sponsor
+
+如果你喜欢这个系列，可以微信赞助我哦！
+
+<img src="sponsor/wechat.png" width=255 height=255 />

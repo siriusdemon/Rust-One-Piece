@@ -17,7 +17,7 @@ pub fn is_digit(s: &str) -> bool {
             return false;
         }
     }
-    return true
+    return true;
 }
 
 

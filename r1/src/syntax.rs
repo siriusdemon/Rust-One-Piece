@@ -32,8 +32,8 @@ impl<T, H> SymTable<T, H> where T: Eq + Hash, H: Eq + Hash {
         }
     }
     pub fn lookup(&self, x: &T) -> &H {
-        if let Some(int) = self.map.get(x) {
-            return int;
+        if let Some(h) = self.map.get(x) {
+            return h;
         } else if let Some(env) = &self.env {
             return env.lookup(x);
         } else {

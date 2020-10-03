@@ -4,7 +4,7 @@
 
 ### 教材
 
-我使用的是 eoc (Essential of Compilation)，是 IU 的教授写的，目前还没写完。可以免费下载：官方 [Github](https://github.com/IUCompilerCourse/public-student-support-code) 。这本书也包含在本次教程的 [Github](https://github.com/siriusdemon/eoc) 中。
+我使用的是 eoc (Essential of Compilation)，是 IU 的教授写的，目前还没写完。可以免费下载：官方 [Github](https://github.com/IUCompilerCourse/public-student-support-code) 。这本书也包含在本次教程的 [Gitee](https://gitee.com/siriusdemon/Rust-One-Piece) 中。
 
 ### Rust
 
@@ -21,6 +21,8 @@
 
 + 博客部分：
   + [R0](blog/r0.md)
+  + [R1 一](blog/r1.md)
+  + [R1 二](blog/r1_2.md)
 
 ### 初心
 

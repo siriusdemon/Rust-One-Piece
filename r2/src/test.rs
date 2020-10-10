@@ -23,13 +23,13 @@ fn test_env2() {
 #[test]
 fn test_let() {
     let exp = Let(Box::new(Var(string!("x"))), Box::new(Int(8)), Box::new(Prim2(string!("+"), Box::new(Var(string!("x"))), Box::new(Int(34)))));
-    assert_eq!(42, interp_r1(exp));
+    assert_eq!(Int(42), interp_r2(exp));
 }
 #[test]
 fn test_nest_let() {
     let exp = Let(Box::new(Var(string!("x"))), Box::new(Int(8)), 
                 Box::new(Let(Box::new(Var(string!("y"))), Box::new(Int(34)), Box::new(Prim2(string!("+"), Box::new(Var(string!("x"))), Box::new(Var(string!("y"))))))));
-    assert_eq!(42, interp_r1(exp));
+    assert_eq!(Int(42), interp_r2(exp));
 }
 #[test]
 fn test_parser() {
@@ -54,40 +54,101 @@ fn test_parser_atom() {
     assert_eq!(exp, res);
 }
 #[test]
-fn test_interp_r1() {
+fn test_interp_r2() {
     let e = "(let (x 8) (let (y 34) (+ x y)))";
     let exp = parse(e);
-    let res = interp_r1(exp);
-    assert_eq!(res, 42);
+    let res = interp_r2(exp);
+    assert_eq!(res, Int(42));
 }
 #[test]
-fn test_interp_r1_2() {
+fn test_interp_r2_2() {
     let e = "(let (x (let (y 10) 
                         (- y))) 
                 (let (z (+ 1 2))
                     (+ x z)))";
     let exp = parse(e);
-    let res = interp_r1(exp);
-    assert_eq!(-7, res);
+    let res = interp_r2(exp);
+    assert_eq!(Int(-7), res);
 }
 #[test]
-fn test_interp_r1_shadow() {
+fn test_interp_r2_shadow() {
     let e = "(let (x 10)
                 (let (y 4)
                     (let (x 20)
                         (+ x y))))";
     let exp = parse(e);
-    let res = interp_r1(exp);
-    assert_eq!(24, res);
+    let res = interp_r2(exp);
+    assert_eq!(Int(24), res);
 }
 #[test]
-fn test_interp_r1_shadow_2() {
+fn test_interp_r2_shadow_2() {
     let e = "(let (x (let (x 4) 
                         (+ x 1)))
                 (+ x 2))";
     let exp = parse(e);
-    let res = interp_r1(exp);
-    assert_eq!(res, 7);
+    let res = interp_r2(exp);
+    assert_eq!(res, Int(7));
+}
+#[test]
+fn test_interp_r2_minus() {
+    let e = "(let (x 10)
+                (- x 2))";
+    let exp = parse(e);
+    let res = interp_r2(exp);
+    assert_eq!(res, Int(8));
+}
+#[test]
+fn test_interp_r2_cmp() {
+    let e = "(let (x 10)
+                (> x 2))";
+    let exp = parse(e);
+    let res = interp_r2(exp);
+    assert_eq!(res, Bool(true));
+}
+#[test]
+fn test_interp_r2_eq() {
+    let e = "(let (x 10)
+                (eq? x 2))";
+    let exp = parse(e);
+    let res = interp_r2(exp);
+    assert_eq!(res, Bool(false));
+}
+#[test]
+fn test_interp_r2_logical() {
+    let e = "(let (x #f)
+                (let (y #t)
+                    (or x y)))";
+    let exp = parse(e);
+    let res = interp_r2(exp);
+    assert_eq!(res, Bool(true));
+}
+#[test]
+fn test_interp_r2_logical_2() {
+    let e = "(let (x #f)
+                (let (y #t)
+                    (not x)))";
+    let exp = parse(e);
+    let res = interp_r2(exp);
+    assert_eq!(res, Bool(true));
+}
+#[test]
+fn test_interp_r2_if() {
+    let e = "(if #t #f #t)";
+    let exp = parse(e);
+    let res = interp_r2(exp);
+    assert_eq!(res, Bool(false));
+}
+#[test]
+fn test_interp_r2_if2() {
+    let e = "(if (not (if (and (let (x 10)
+                            (let (y 32)
+                                (eq? (+ x y) 42)))
+                            #f)
+                        #f #t))
+                24 42)";
+    let exp = parse(e);
+    let res = interp_r2(exp);
+    assert_eq!(res, Int(42));
 }
 #[test]
 #[should_panic(expected="variable could not be digit!")]
@@ -109,8 +170,8 @@ fn test_uniquify() {
     } else {
         panic!("uniquify fails!");
     }
-    let res = interp_r1(exp);
-    assert_eq!(res, 7);
+    let res = interp_r2(exp);
+    assert_eq!(res, Int(7));
 }
 #[test]
 fn test_remove_complex_opera() {
@@ -124,7 +185,23 @@ fn test_remove_complex_opera() {
     } else {
         panic!("remove_complex_opera fails!");
     }
-    assert_eq!(interp_r1(exp), 2);
+    assert_eq!(interp_r2(exp), Int(2));
+}
+#[test]
+fn test_remove_complex_opera2() {
+    let e = "(+ (+ 10 32) (+ 39 3))";
+    let exp = parse(e);
+    let exp = remove_complex_opera(exp);
+    if let Let(box Var(x), box Prim2(_add, box Int(n10), box Int(n32)), 
+        box Let(box Var(y), box Prim2(add, box Int(n39), box Int(n3)), 
+            box Prim2(add_, box Var(x_), box Var(y_)))) = &exp {
+        assert_eq!(x, x_);
+        assert_eq!(y, y_);
+        assert_eq!(n3, &3);
+    } else {
+        panic!("remove_complex_opera fails!");
+    }
+    assert_eq!(interp_r2(exp), Int(84));
 }
 use crate::syntax::{C0Program, C0};
 #[test]

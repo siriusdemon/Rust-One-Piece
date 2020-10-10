@@ -36,17 +36,22 @@ fn compile(expr: &str) -> std::io::Result<()> {
     use crate::parser::parse;
     use crate::compiler::*;
     let expr = parse(expr);
-    let expr = uniquify(expr);
+    // let expr = uniquify(expr);
     let expr = remove_complex_opera(expr);
     let expr = explicate_control(expr);
     let expr = select_instruction(expr);
-    let expr = assign_homes(expr);
+    let expr = allocate_registers(expr);
     let expr = patch_instructions(expr);
     print_x86(expr, "r2.asm");
     Ok(())
 }
 
 fn main() -> std::io::Result<()> {
-    let s = "(let (x 10) x)";
+    let s = "(let (v 1)
+             (let (w 46)
+             (let (x (+ v 7))
+             (let (y (+ 4 x))
+             (let (z (+ x w))
+                (+ z (- y)))))))";
     compile(s)
 }

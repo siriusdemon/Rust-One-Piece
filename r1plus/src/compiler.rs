@@ -41,7 +41,7 @@ pub fn remove_complex_opera(expr: Expr) -> Expr {
         },
         Prim0(op) => Prim0(op),
         Prim1(op, box e) => {
-            if is_prim1_or_prim2(&e) {
+            if is_complex(&e) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e)), Box::new(Prim1(op, Box::new(Var(x)))))
             } else {
@@ -49,16 +49,16 @@ pub fn remove_complex_opera(expr: Expr) -> Expr {
             }
         },
         Prim2(op, box e1, box e2) => {
-            if is_prim1_or_prim2(&e1) && is_prim1_or_prim2(&e2) {
+            if is_complex(&e1) && is_complex(&e2) {
                 let (x, y) = (gensym(), gensym());
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e1)), 
                     Box::new( Let ( Box::new(Var(y.clone())), Box::new(remove_complex_opera(e2)), 
                         Box::new(Prim2(op, Box::new(Var(x)), Box::new(Var(y)))))))
-            } else if is_prim1_or_prim2(&e1) {
+            } else if is_complex(&e1) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e1)), 
                     Box::new(Prim2(op, Box::new(Var(x)), Box::new(remove_complex_opera(e2)))))
-            } else if is_prim1_or_prim2(&e2) {
+            } else if is_complex(&e2) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e2)), 
                     Box::new(Prim2(op, Box::new(remove_complex_opera(e1)), Box::new(Var(x)))))
@@ -66,75 +66,75 @@ pub fn remove_complex_opera(expr: Expr) -> Expr {
                 Prim2(op, Box::new( remove_complex_opera(e1)), Box::new(remove_complex_opera(e2) ))
             }
         },
-        _ => panic!("should not reach!"),
+        e => { println!("{:?}", e); panic!("should not reach!"); }
     }
 }
 
 
-fn is_prim1_or_prim2(expr: &Expr) -> bool {
+fn is_complex(expr: &Expr) -> bool {
+    let any_let = Let(Box::new(Var(String::new())), Box::new(Int(1)), Box::new(Int(1)));
+    let any_prim0 = Prim0(String::new());
     let any_prim1 = Prim1(String::new(), Box::new(Int(1)));
     let any_prim2 = Prim2(String::new(), Box::new(Int(1)), Box::new(Int(1)));
+    mem::discriminant(expr) == mem::discriminant(&any_let)   ||
+    mem::discriminant(expr) == mem::discriminant(&any_prim0) ||
     mem::discriminant(expr) == mem::discriminant(&any_prim1) ||
-    mem::discriminant(expr) == mem::discriminant(&any_prim2)
+    mem::discriminant(expr) == mem::discriminant(&any_prim2) 
 }
 
 // ------------------------------ explicate control ------------------------
 use crate::syntax::{C0, C0Program};
 pub fn explicate_control(expr: Expr) -> C0Program {
-    let expr = let_to_seq(expr);
-    let expr = flatten_seq(expr);
-    let locals = collect_vars(&expr);
-    C0Program { locals, cfg: vec![("start".to_string(), expr)]}
+    let mut cfg = vec![];
+    let mut locals = vec![];
+    let expr = explicate_tail(expr, &mut cfg, &mut locals);
+    cfg.push(("start".to_string(), expr));
+    C0Program { locals, cfg }
+}
+
+fn explicate_tail(expr: Expr, cfg: &mut Vec<(String, C0)>, locals: &mut Vec<C0>) -> C0 {
+    match expr {
+        Let(box Var(x), box e, box body) => {
+            let tail = explicate_tail(body, cfg, locals);
+            let tail = explicate_assign(C0::Var(x), e, tail, locals, cfg);
+            return tail;
+        }
+        e => {
+            return C0::Return(Box::new(expr_to_C0(e)));
+        }
+    }
+}
+
+fn explicate_assign(x: C0, expr: Expr, tail: C0, locals: &mut Vec<C0>, cfg: &mut Vec<(String, C0)>) -> C0 {
+    use C0::{Assign, Seq};
+    match expr {
+        Let(box Var(x_), box e, box body) => {
+            let tail = explicate_assign(x, body, tail, locals, cfg);
+            let e = explicate_assign(C0::Var(x_), e, tail, locals, cfg);
+            return e;
+        },
+        e => {
+            locals.push(x.clone());
+            let e = expr_to_C0(e);
+            let assign = Assign(Box::new(x), Box::new(e));
+            return Seq(Box::new(assign), Box::new(tail));
+        }
+    }
 }
 
 
-pub fn let_to_seq(expr: Expr) -> C0 {
+fn expr_to_C0(expr: Expr) -> C0 {
     match expr {
         Int(n) => C0::Int(n),
         Var(x) => C0::Var(x),
         Prim0(op) => C0::Prim0(op),
-        Prim1(op, box e) => C0::Prim1(op, Box::new( let_to_seq(e) )),
-        Prim2(op, box e1, box e2) => C0::Prim2(op, Box::new( let_to_seq(e1) ), Box::new( let_to_seq(e2) )),
-        Let(box Var(x), box e, box body) => {
-            let assign = C0::Assign(Box::new(C0::Var(x)), Box::new(let_to_seq(e)));
-            C0::Seq(Box::new(assign), Box::new(let_to_seq(body)))
+        Prim1(op, box e) => C0::Prim1(op, Box::new( expr_to_C0(e) )),
+        Prim2(op, box e1, box e2) => C0::Prim2(op, Box::new( expr_to_C0(e1) ), Box::new( expr_to_C0(e2) )),
+        e => {
+            println!("{:?}", e);
+            panic!("No complex structure! Handle it by yourself!");
         }
-        _ => panic!("bad syntax"),
     }
-}
-
-pub fn flatten_seq(expr: C0) -> C0 {
-    use C0::*;
-    let mut stack = Vec::new();
-    let mut tail = Return(Box::new(flatten_seq_helper(expr, &mut stack)));
-    while let Some(assign) = stack.pop() {
-        let seq = Seq(Box::new(assign), Box::new(tail));
-        tail = seq; 
-    }
-    return tail;
-}
-
-pub fn flatten_seq_helper(expr: C0, stack: &mut Vec<C0>) -> C0 {
-    use C0::*;
-    match expr {
-        Seq(box Assign(box x, box e), box tail) => {
-            let e = flatten_seq_helper(e, stack);
-            let assign = Assign(Box::new(x), Box::new(e));
-            stack.push(assign);
-            return flatten_seq_helper(tail, stack);
-        }
-        e => e,
-    }
-}
-
-fn collect_vars(mut expr: &C0) -> Vec<C0> {
-    use C0::*;
-    let mut vars = vec![];
-    while let Seq(box Assign(box x, box _e), box tail) = expr {
-        vars.push(x.clone());
-        expr = tail;
-    }
-    return vars;
 }
 
 // ----------------- select instructions -----------------------------------

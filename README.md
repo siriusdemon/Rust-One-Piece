@@ -17,12 +17,13 @@
 
 ### 目前进展
 
-+ 代码部分：eoc 第二章。
-
-+ 博客部分：
-  + [R0](blog/r0.md)
-  + [R1 一](blog/r1.md)
-  + [R1 二](blog/r1_2.md)
++ [R0](blog/r0.md)
++ [R1 一](blog/r1.md)
++ [R1 二](blog/r1_2.md)
++ [R1 三](blog/r1_3.md)
++ [R1 四](blog/r1_4.md)
++ [R1 Plus](blog/r1plus.md)
++ [R2 一](blog/r2.md)
 
 ### 初心
 

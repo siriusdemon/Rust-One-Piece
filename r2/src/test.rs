@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use crate::*;
 use crate::syntax::SymTable;
 use crate::{hashmap, string};
@@ -215,7 +216,8 @@ fn test_explicate_control() {
     let (label, codes) = blocks.pop().unwrap();
     assert!(matches!(&codes, Seq(box Assign(box Var(x), box Prim2(add, box Int(n1), box Int(n2))), box Return(box Var(x_))) if x == x_));
 }
-use crate::syntax::{x86, x86Block, x86Program};
+
+use crate::syntax::{x86, x86Program};
 #[test]
 fn test_select_instruction() {
     use x86::*;
@@ -225,8 +227,9 @@ fn test_select_instruction() {
     let exp = parse(e);
     let exp = remove_complex_opera(exp);
     let exp = explicate_control(exp);
-    let block = select_instruction(exp);
-    let x86Block { locals, instructions, stack_space, name } = block;
+    let prog = select_instruction(exp);
+    let x86Program { locals, mut cfg, stack_space } = prog;
+    let instructions = cfg.get(&"start".to_string()).unwrap();
     match instructions.as_slice() {
         [_mov1, _mov2, _mov3, jump] => assert!(matches!(jump, Jmp(label) if label.as_str() == "conclusion")),
         _ => panic!("fails in select instruction"),
@@ -243,7 +246,8 @@ fn test_allocate_registers() {
     let exp = explicate_control(exp);
     let block = select_instruction(exp);
     let block = allocate_registers(block);
-    let x86Block { locals, instructions, stack_space, name } = block;
+    let x86Program { locals, cfg, stack_space } = block;
+    let instructions = cfg.get(&"start".to_string()).unwrap();
     match instructions.as_slice() {
         [_mov1, mov2, _mov3, _jump] => {
             assert!(matches!(mov2, Op2(mov, box reg1, box reg2) 
@@ -265,7 +269,8 @@ fn test_patch_instructions() {
     let block = select_instruction(exp);
     let block = allocate_registers(block);
     let block = patch_instructions(block);
-    let x86Block { locals, instructions, stack_space, name } = block;
+    let x86Program { locals, cfg, stack_space } = block;
+    let instructions = cfg.get(&"start".to_string()).unwrap();
     match instructions.as_slice() {
         [_mov1, mov2, _jump] => {
             assert!(matches!(mov2, Op2(mov, box rdx, box r) 
@@ -290,6 +295,8 @@ fn test_x86_display() {
     assert_eq!(format!("{}", call), "callq read_int");
     assert_eq!(format!("{}", push), "pushq %rbp");
     assert_eq!(format!("{}", pop), "popq %rsp");
+    let jne = x86::Jmpif("ne".to_string(), "somewhere".to_string());
+    assert_eq!(format!("{}", jne), "jne somewhere");
 }
 #[test]
 #[should_panic]
@@ -310,7 +317,9 @@ fn test_uncover_live() {
     let exp = remove_complex_opera(exp);
     let exp = explicate_control(exp);
     let block = select_instruction(exp);
-    let liveset = uncover_live(&block.instructions);
+    let x86Program {mut cfg, stack_space, locals } = block;
+    let instructions = cfg.get(&"start".to_string()).unwrap();
+    let liveset = uncover_live(instructions, HashSet::new());
     let a = Var("a".to_string());
     let b = Var("b".to_string());
     let c = Var("c".to_string());
@@ -319,4 +328,79 @@ fn test_uncover_live() {
         hashset!(&c), hashset!(), hashset!(), 
     ];
     assert_eq!(expect, liveset);
+}
+#[test]
+fn test_uncover_live2() {
+    use x86::*;
+    let exp = "(let (a 5)
+               (let (b 30)
+               (let (c a)
+               (let (b 10)
+               (let (c (+ b c))
+                   c)))))";
+    let exp = parse(exp);
+    let exp = remove_complex_opera(exp);
+    let exp = explicate_control(exp);
+    let block = select_instruction(exp);
+    let liveset = uncover_live_prog(&block);
+    let a = Var("a".to_string());
+    let b = Var("b".to_string());
+    let c = Var("c".to_string());
+    let expect = vec![
+        hashset!(&a), hashset!(&a), hashset!(&c), hashset!(&c, &b),
+        hashset!(&c), hashset!(), hashset!(), 
+    ];
+    assert_eq!(Some(&expect), liveset.get(&"start".to_string()));
+}
+
+
+use crate::typesystem::*;
+use crate::typesystem::RType::*;
+#[test]
+fn test_type_checker() {
+    let exp = "(let (x 10) 
+                   (+ x 29))";
+    let exp = parse(exp);
+    let etype = type_checker(&exp);
+    assert_eq!(etype, Integer);
+    let exp = "(- 10 20)";
+    let exp = parse(exp);
+    let etype = type_checker(&exp);
+    assert_eq!(Integer, etype);
+}
+#[test]
+#[should_panic]
+fn test_type_checker2() {
+    let exp = "(if (not 1) #t #f)";
+    let exp = parse(exp);
+    let etype = type_checker(&exp);
+}
+#[test]
+fn test_type_checker3() {
+    let exp = "(and (> 10 20) (eq? 10 42))";
+    let exp = parse(exp);
+    let etype = type_checker(&exp);
+    assert_eq!(etype, Boolean);
+}
+#[test]
+fn test_shrink2() {
+    fn helper(e: &str, expect: Expr) {
+        let exp = parse(e);
+        let exp = shrink(exp);
+        let res = interp_r2(exp);
+        assert_eq!(res, expect);
+    }
+    helper("(>= 3 3)", Bool(true));
+    helper("(or #f #t", Bool(true));
+    helper("(and #t #t", Bool(true));
+    helper("(- 10 30)", Int(-20));
+    helper("(<= 4 3)", Bool(false));
+    helper("(and (> 10 20) (eq? 10 42))", Bool(false));
+}
+#[test]
+fn test_shrink3() {
+    let s = "(- 10 20)";
+    let e = parse(s);
+    let e = shrink(e);
+    matches!(e, Prim2(op, box Int(n10), box Prim1(op2, box Int(n20))) if n10 == 10 && op2.as_str() == "-");
 }

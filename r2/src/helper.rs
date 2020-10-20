@@ -23,7 +23,7 @@ pub fn is_digit(s: &str) -> bool {
 
 pub fn gensym() -> String {
     use uuid::Uuid;
-    return Uuid::new_v4().to_string();
+    return Uuid::new_v4().to_string()[..8].to_string();
 }
 
 pub fn is_arithmetic(op: &str) -> bool {

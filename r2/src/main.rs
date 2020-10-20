@@ -5,6 +5,8 @@ mod syntax;
 mod helper;
 mod parser;
 mod compiler;
+mod typesystem;
+mod tsort;
 mod test;
 
 pub use crate::syntax::Expr::{self, *};
@@ -65,13 +67,47 @@ fn interp_r2(expr: Expr) -> Expr {
 }
 
 
-fn main() {
-    use parser::parse;
-    use compiler::remove_complex_opera;
-    let e = "(+ (+ 10 32) (+ 10 3))";
-    let exp = parse(e);
-    let exp = remove_complex_opera(exp);
-    println!("{:?}", exp);
-    let r = interp_r2(exp);
-    println!("{:?}", r);
+fn compile(expr: &str, filename: &str) -> std::io::Result<()> {
+    use crate::parser::parse;
+    use crate::compiler::*;
+    let expr = parse(expr);
+    // let expr = uniquify(expr);
+    let expr = remove_complex_opera(expr);
+    let expr = explicate_control(expr);
+    let expr = select_instruction(expr);
+    let expr = allocate_registers(expr);
+    let expr = patch_instructions(expr);
+    print_x86(expr, filename);
+    Ok(())
 }
+
+fn main() -> std::io::Result<()> {
+    let e = "(let (x 10)
+                (let (y 20)
+                (let (c 42)
+                    (if (< c y)
+                        (+ x 10)
+                        (if (eq? x 43)
+                            (+ c 20)
+                            c)))))";
+    compile(e, "r2.asm")
+}
+
+
+     // let e = "(if (if (let (tmp42 (read))
+    //                     (eq? tmp42 1))
+    //                 (let (tmp43 (read))
+    //                     (eq? tmp43 2))
+    //                 (let (tmp44 (read))
+    //                     (eq? tmp44 3)))
+    //             (+ 10 32)
+                // (+ 2  40))";
+    // let e = "(let (y (read))
+    //             (if (if (< y 0)
+    //                     (< y -10)
+    //                     (< 10 y))
+    //                 (+ 10 y)
+    //                 (+ 20 y)))";
+                    
+    // let e = "(let (c (if #t #f #t))
+    //            (if c 10 20))";

@@ -58,22 +58,25 @@ impl<T, H> SymTable<T, H> where T: Eq + Hash, H: Eq + Hash {
 }
 
 
-// C0
+// C1 -- Just keep C0 because I am lazy
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum C0 {
     Int(i64),
     Var(String),
+    Bool(bool),
     Prim0(String),
     Prim1(String, Box<C0>),
     Prim2(String, Box<C0>, Box<C0>),
     Assign(Box<C0>, Box<C0>),
     Return(Box<C0>),
     Seq(Box<C0>, Box<C0>),
+    Goto(String),
+    If(Box<C0>, Box<C0>, Box<C0>),
 }
 
 #[derive(Debug)]
 pub struct C0Program {
-    pub locals: Vec<C0>,
+    pub locals: HashSet<C0>,
     pub cfg: Vec<(String, C0)>, // control flow 
 }
 
@@ -82,6 +85,7 @@ pub struct C0Program {
 pub enum x86 {
     RSP, RBP, RAX, RBX, RCX, RDX, RSI, RDI, 
     R8, R9, R10, R11, R12, R13, R14, R15,
+    AL, AH, BL, BH, CL, CH, DL, DH,
     Imm(i64),
     Var(String),
     Deref(Box<x86>, i64),
@@ -92,19 +96,15 @@ pub enum x86 {
     Pushq(Box<x86>),
     Popq(Box<x86>),
     Jmp(String),
-}
-
-#[derive(Debug)]
-pub struct x86Block {
-    pub locals: Vec<x86>,
-    pub instructions: Vec<x86>,
-    pub stack_space: usize,
-    pub name: String,
+    Set(String, Box<x86>),
+    Jmpif(String, String),
 }
 
 #[derive(Debug)]
 pub struct x86Program {
-    pub cfg: Vec<(String, x86Block)>, // control flow 
+    pub cfg: HashMap<String, Vec<x86>>, // control flow 
+    pub locals: HashSet<x86>,
+    pub stack_space: usize,
 }
 
 use std::fmt;
@@ -116,6 +116,8 @@ impl fmt::Display for x86 {
             RSI => write!(f, "%rsi"), RDI => write!(f, "%rdi"), RBP => write!(f, "%rbp"), RSP => write!(f, "%rsp"), 
             R8  => write!(f, "%r8"),  R9  => write!(f, "%r9"),  R10 => write!(f, "%r10"), R11 => write!(f, "%r11"), 
             R12 => write!(f, "%r12"), R13 => write!(f, "%r13"), R14 => write!(f, "%r14"), R15 => write!(f, "%r15"),
+            AH => write!(f, "%ah"),   AL => write!(f, "%al"),   BH => write!(f, "%bh"),   BL => write!(f, "%bl"),
+            CH => write!(f, "%ch"),   CL => write!(f, "%cl"),   DH => write!(f, "%dh"),   DL => write!(f, "%dl"),
             Imm(n) => write!(f, "${}", n),
             Deref(box reg, n) => write!(f, "{}({})", n, reg),
             Op1(op, box e) => write!(f, "{} {}", op, e),
@@ -125,6 +127,7 @@ impl fmt::Display for x86 {
             Pushq(box reg) => write!(f, "pushq {}", reg),
             Popq(box reg) => write!(f, "popq {}", reg),
             Jmp(label) => write!(f, "jmp {}", label),
+            Jmpif(cc, label) => write!(f, "j{} {}", cc, label),
             e => panic!("invalid x86 code"),
         }
     }

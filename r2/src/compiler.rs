@@ -1,7 +1,49 @@
+use std::collections::{HashSet, HashMap};
+
+
 use crate::syntax::Expr::{self, *};
 use crate::syntax::SymTable;
 use crate::helper::gensym;
 use crate::hashmap;
+
+// ---------------------------------- shrink pass ----------------------------------------------
+// maybe not be necessary
+pub fn shrink(expr: Expr) -> Expr {
+    match expr {
+        Prim2(op, box e1, box e2) => {
+            match op.as_str() {
+                "-" => Prim2("+".to_string(), Box::new(e1), Box::new(Prim1("-".to_string(), Box::new(e2)))),
+                "or" => {
+                    let x = Var(gensym());
+                    Let(Box::new(x.clone()), Box::new(e1),
+                        Box::new(If(Box::new(x.clone()), Box::new(x), Box::new(e2))))
+                }
+                "and" => {
+                    let x = Var(gensym());
+                    Let(Box::new(x.clone()), Box::new(e1),
+                        Box::new(If(Box::new(Prim1("not".to_string(), Box::new(x.clone()))), Box::new(x), Box::new(e2))))
+                }
+                ">=" => { // (not (< e1 e2))
+                    let x = Var(gensym());
+                    Let(Box::new(x.clone()), Box::new(e1),
+                        Box::new(Prim1("not".to_string(), Box::new(Prim2("<".to_string(), Box::new(x), Box::new(e2))))))
+                }
+                "<=" => { // (not (< e2 e1)
+                    let x = Var(gensym());
+                    Let(Box::new(x.clone()), Box::new(e1),
+                        Box::new(Prim1("not".to_string(), Box::new(Prim2("<".to_string(), Box::new(e2), Box::new(x))))))
+                }
+                ">" => { // (< e2 e1)
+                    let x = Var(gensym());
+                    Let(Box::new(x.clone()), Box::new(e2),
+                        Box::new(Prim2("<".to_string(), Box::new(x), Box::new(e1))))
+                }
+                op => Prim2(op.to_string(), Box::new(shrink(e1)), Box::new(shrink(e2)))
+            }
+        }
+        e => e
+    }
+}
 
 // ---------------------------------- uniquify pass ---------------------------------------------
 // make every variable name unique
@@ -15,6 +57,7 @@ fn uniquify_expr(expr: Expr, symtable: Rc<SymTable<String, String>>) -> Expr {
     match expr {
         Var(x) => Var(symtable.lookup(&x).to_string()),
         Int(n) => Int(n),
+        Bool(b) => Bool(b),
         Let(box Var(x), box e, box body) => {
             let new_x = gensym();
             let new_symtable: SymTable<String, String> = SymTable::extend(hashmap!(x => new_x.clone()), &symtable);
@@ -26,6 +69,9 @@ fn uniquify_expr(expr: Expr, symtable: Rc<SymTable<String, String>>) -> Expr {
         Prim1(op, box e1) => Prim1(op, Box::new( uniquify_expr(e1, symtable))),
         Prim2(op, box e1, box e2) => Prim2(op, Box::new(uniquify_expr(e1, Rc::clone(&symtable))), 
                                                Box::new(uniquify_expr(e2, symtable))),
+        If(box e, box e1, box e2) => If(Box::new(uniquify_expr(e, Rc::clone(&symtable))), 
+                                        Box::new(uniquify_expr(e1, Rc::clone(&symtable))),
+                                        Box::new(uniquify_expr(e2, symtable))),
         _ => panic!("should not reach!"),
     }
 }
@@ -36,12 +82,16 @@ pub fn remove_complex_opera(expr: Expr) -> Expr {
     match expr {
         Var(x) => Var(x),
         Int(n) => Int(n),
+        Bool(b) => Bool(b),
         Let(box Var(x), box e, box body) => {
-            Let ( Box::new(Var(x)), Box::new( remove_complex_opera(e) ), Box::new( remove_complex_opera(body) ))
+            Let( Box::new(Var(x)), Box::new( remove_complex_opera(e) ), Box::new(remove_complex_opera(body)))
+        },
+        If(box e, box e1, box e2) => {
+            If(Box::new(remove_complex_opera(e)), Box::new(remove_complex_opera(e1)), Box::new(remove_complex_opera(e2)))
         },
         Prim0(op) => Prim0(op),
         Prim1(op, box e) => {
-            if is_prim1_or_prim2(&e) {
+            if is_complex(&e) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e)), Box::new(Prim1(op, Box::new(Var(x)))))
             } else {
@@ -49,16 +99,16 @@ pub fn remove_complex_opera(expr: Expr) -> Expr {
             }
         },
         Prim2(op, box e1, box e2) => {
-            if is_prim1_or_prim2(&e1) && is_prim1_or_prim2(&e2) {
+            if is_complex(&e1) && is_complex(&e2) {
                 let (x, y) = (gensym(), gensym());
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e1)), 
                     Box::new( Let ( Box::new(Var(y.clone())), Box::new(remove_complex_opera(e2)), 
                         Box::new(Prim2(op, Box::new(Var(x)), Box::new(Var(y)))))))
-            } else if is_prim1_or_prim2(&e1) {
+            } else if is_complex(&e1) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e1)), 
                     Box::new(Prim2(op, Box::new(Var(x)), Box::new(remove_complex_opera(e2)))))
-            } else if is_prim1_or_prim2(&e2) {
+            } else if is_complex(&e2) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e2)), 
                     Box::new(Prim2(op, Box::new(remove_complex_opera(e1)), Box::new(Var(x)))))
@@ -66,86 +116,136 @@ pub fn remove_complex_opera(expr: Expr) -> Expr {
                 Prim2(op, Box::new( remove_complex_opera(e1)), Box::new(remove_complex_opera(e2) ))
             }
         },
-        _ => panic!("should not reach!"),
+        e => { println!("{:?}", e); panic!("should not reach!"); }
     }
 }
 
 
-fn is_prim1_or_prim2(expr: &Expr) -> bool {
+fn is_complex(expr: &Expr) -> bool {
+    let any_if = If(Box::new(Int(1)), Box::new(Int(1)), Box::new(Int(1))); 
+    let any_let = Let(Box::new(Var(String::new())), Box::new(Int(1)), Box::new(Int(1)));
+    let any_prim0 = Prim0(String::new());
     let any_prim1 = Prim1(String::new(), Box::new(Int(1)));
     let any_prim2 = Prim2(String::new(), Box::new(Int(1)), Box::new(Int(1)));
+    mem::discriminant(expr) == mem::discriminant(&any_if)    ||
+    mem::discriminant(expr) == mem::discriminant(&any_let)   ||
+    mem::discriminant(expr) == mem::discriminant(&any_prim0) ||
     mem::discriminant(expr) == mem::discriminant(&any_prim1) ||
-    mem::discriminant(expr) == mem::discriminant(&any_prim2)
+    mem::discriminant(expr) == mem::discriminant(&any_prim2) 
 }
 
 // ------------------------------ explicate control ------------------------
 use crate::syntax::{C0, C0Program};
 pub fn explicate_control(expr: Expr) -> C0Program {
-    let expr = let_to_seq(expr);
-    let expr = flatten_seq(expr);
-    let locals = collect_vars(&expr);
-    C0Program { locals, cfg: vec![("start".to_string(), expr)]}
+    let mut cfg = vec![];
+    let mut locals = HashSet::new();
+    let expr = explicate_tail(expr, &mut cfg, &mut locals);
+    cfg.push(("start".to_string(), expr));
+    C0Program { locals, cfg }
 }
 
+fn explicate_tail(expr: Expr, cfg: &mut Vec<(String, C0)>, locals: &mut HashSet<C0>) -> C0 {
+    match expr {
+        Let(box Var(x), box e, box body) => {
+            let tail = explicate_tail(body, cfg, locals);
+            let tail = explicate_assign(C0::Var(x), e, tail, locals, cfg);
+            return tail;
+        }
+        If(box e, box e1, box e2) => {
+            let tail1 = explicate_tail(e1, cfg, locals);
+            let tail2 = explicate_tail(e2, cfg, locals);
+            let tail = explicate_pred(e, tail1, tail2, locals, cfg);
+            return tail;
+        }
+        e => {
+            return C0::Return(Box::new(expr_to_C0(e)));
+        }
+    }
+}
 
-pub fn let_to_seq(expr: Expr) -> C0 {
+fn explicate_assign(x: C0, expr: Expr, tail: C0, locals: &mut HashSet<C0>, cfg: &mut Vec<(String, C0)>) -> C0 {
+    use C0::{Assign, Seq};
+    match expr {
+        Let(box Var(x_), box e, box body) => {
+            let tail = explicate_assign(x, body, tail, locals, cfg);
+            let e = explicate_assign(C0::Var(x_), e, tail, locals, cfg);
+            return e;
+        },
+        If(box e, box e1, box e2) => {
+            // build block for tail
+            let goto = attach_block(tail, cfg);
+            let e1 = explicate_assign(x.clone(), e1, goto.clone(), locals, cfg);
+            let e2 = explicate_assign(x, e2, goto, locals, cfg);
+            return explicate_pred(e, e1, e2, locals, cfg);
+        },
+        e => {
+            locals.insert(x.clone());
+            let e = expr_to_C0(e);
+            let assign = Assign(Box::new(x), Box::new(e));
+            return Seq(Box::new(assign), Box::new(tail));
+        }
+    }
+}
+
+fn explicate_pred(cond: Expr, then: C0, else_: C0, locals: &mut HashSet<C0>, cfg: &mut Vec<(String, C0)>) -> C0 {
+    // e, boolean, if, or cmp
+    match cond {
+        Bool(true) => then,
+        Bool(false) => else_,
+        If(box e, box e1, box e2) => {
+            // attach then and else as b1 b2 
+            let goto1 = attach_block(then, cfg);
+            let goto2 = attach_block(else_, cfg);
+            let nthen = explicate_pred(e1, goto1.clone(), goto2.clone(), locals, cfg);
+            let nelse = explicate_pred(e2, goto1, goto2, locals, cfg);
+            let goto3 = attach_block(nthen, cfg);
+            let goto4 = attach_block(nelse, cfg);
+            return explicate_pred(e, goto3, goto4, locals, cfg);
+        }
+        Let(box Var(x), box e, box body) => {
+            let tail = explicate_pred(body, then, else_, locals, cfg);
+            return explicate_assign(C0::Var(x), e, tail, locals, cfg);
+        }
+        // cmp
+        e => {
+            let goto1 = attach_block(then, cfg);
+            let goto2 = attach_block(else_, cfg); 
+            C0::If(Box::new(expr_to_C0(e)), Box::new(goto1), Box::new(goto2))
+        }
+    }
+}
+
+fn expr_to_C0(expr: Expr) -> C0 {
     match expr {
         Int(n) => C0::Int(n),
         Var(x) => C0::Var(x),
+        Bool(b) => C0::Bool(b),
         Prim0(op) => C0::Prim0(op),
-        Prim1(op, box e) => C0::Prim1(op, Box::new( let_to_seq(e) )),
-        Prim2(op, box e1, box e2) => C0::Prim2(op, Box::new( let_to_seq(e1) ), Box::new( let_to_seq(e2) )),
-        Let(box Var(x), box e, box body) => {
-            let assign = C0::Assign(Box::new(C0::Var(x)), Box::new(let_to_seq(e)));
-            C0::Seq(Box::new(assign), Box::new(let_to_seq(body)))
+        Prim1(op, box e) => C0::Prim1(op, Box::new( expr_to_C0(e) )),
+        Prim2(op, box e1, box e2) => C0::Prim2(op, Box::new( expr_to_C0(e1) ), Box::new( expr_to_C0(e2) )),
+        e => {
+            println!("{:?}", e);
+            panic!("No complex structure! Handle it by yourself!");
         }
-        _ => panic!("bad syntax"),
     }
 }
 
-pub fn flatten_seq(expr: C0) -> C0 {
-    use C0::*;
-    let mut stack = Vec::new();
-    let mut tail = Return(Box::new(flatten_seq_helper(expr, &mut stack)));
-    while let Some(assign) = stack.pop() {
-        let seq = Seq(Box::new(assign), Box::new(tail));
-        tail = seq; 
-    }
-    return tail;
-}
 
-pub fn flatten_seq_helper(expr: C0, stack: &mut Vec<C0>) -> C0 {
-    use C0::*;
-    match expr {
-        Seq(box Assign(box x, box e), box tail) => {
-            let e = flatten_seq_helper(e, stack);
-            let assign = Assign(Box::new(x), Box::new(e));
-            stack.push(assign);
-            return flatten_seq_helper(tail, stack);
-        }
-        e => e,
-    }
+fn attach_block(expr: C0, cfg: &mut Vec<(String, C0)>) -> C0 {
+    let label = gensym();
+    cfg.push((label.clone(), expr));
+    return C0::Goto(label);
 }
-
-fn collect_vars(mut expr: &C0) -> Vec<C0> {
-    use C0::*;
-    let mut vars = vec![];
-    while let Seq(box Assign(box x, box _e), box tail) = expr {
-        vars.push(x.clone());
-        expr = tail;
-    }
-    return vars;
-}
-
+ 
 // ----------------- select instructions -----------------------------------
-use crate::syntax::{x86, x86Block, x86Program};
-pub fn select_instruction(prog: C0Program) -> x86Block {
-    let C0Program { locals, mut cfg } = prog;
-    let (label, codes_C0) = cfg.pop().unwrap();
-    let instructions = C0_to_x86(codes_C0);
-    let locals = vars_c0_to_x86(locals);
-    let x86_block = x86Block { instructions, locals, stack_space: 0, name: "start".to_string() };
-    return x86_block;
+use crate::syntax::{x86, x86Program};
+pub fn select_instruction(prog: C0Program) -> x86Program {
+    let C0Program { locals, cfg } = prog;
+    let cfg = cfg.into_iter()
+        .map(|(label, code)|(label, C0_to_x86(code))).collect();
+    let locals = locals.into_iter()
+        .map(|x| simple_to_x86(x)).collect();
+    x86Program { locals, cfg, stack_space: 0 }
 }
 
 
@@ -167,90 +267,180 @@ pub fn C0_to_x86_helper(expr: C0, code: &mut Vec<x86>) {
             C0_to_x86_helper(assign, code);
             C0_to_x86_helper(tail, code);
         },
+        If(box e, box Goto(e1), box Goto(e2)) => {
+            pred_helper(e, e1, e2, code);
+        },
+        Goto(label) => {
+            code.push( x86::Jmp(label) );
+        },
         _ => panic!("bad syntax"),
     }
 } 
 
+fn pred_helper(expr: C0, then: String, else_: String, code: &mut Vec<x86>) {
+    use C0::*;
+    match expr {
+        Var(x) => {
+            code.push( x86::Op2("cmpq".to_string(), Box::new(x86::Var(x)), Box::new(x86::Imm(1))) );
+            code.push( x86::Jmpif("e".to_string(), then) );
+            code.push( x86::Jmp(else_) );
+        }
+        Prim2(op, box x, box y) => {
+            code.push( x86::Op2("cmpq".to_string(), Box::new(simple_to_x86(y)), Box::new(simple_to_x86(x))) );
+            match op.as_str() {
+                "<"   => code.push( x86::Jmpif("l".to_string(), then) ),
+                "eq?" => code.push( x86::Jmpif("e".to_string(), then) ),
+                _ => panic!("unknown cmp op"),
+            };
+            code.push( x86::Jmp(else_) );
+        }
+        Prim1(op, box x) if op.as_str() == "not" => {
+            code.push( x86::Op2("cmpq".to_string(), Box::new(x86::Imm(0)), Box::new(simple_to_x86(x))) );
+            code.push( x86::Jmpif("e".to_string(), then) );
+            code.push( x86::Jmp(else_) );
+        }
+        _ => unreachable!(),
+    }
+}
+
+// 在发生赋值的时候使用
 fn assign_helper(source: C0, target: x86, code: &mut Vec<x86>) {
     use C0::*;
     match source {
+        Bool(true) => assign_helper(Int(1), target, code),
+        Bool(false) => assign_helper(Int(0), target, code),
         Int(n) => code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(n)), Box::new(target))),
         Var(y) => code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y)), Box::new(target))),
         Prim0(read) if read.as_str() == "read" => {
             code.push( x86::Callq("read_int".to_string()));
             code.push( x86::Op2("movq".to_string(), Box::new(x86::RAX), Box::new(target)));
         },
-        Prim2(add, box e1, box e2) if add.as_str() == "+" => {
+        Prim2(op, box e1, box e2) if op.as_str() == "<" || op.as_str() == "eq?" => {
+            code.push( x86::Op2("cmpq".to_string(), Box::new(simple_to_x86(e2)), Box::new(simple_to_x86(e1))) );
+            let cc = if op.as_str() == "<" { String::from("l") } else { String::from("e") };
+            code.push( x86::Set(cc, Box::new(x86::AL)));
+            code.push( x86::Op2("movzbq".to_string(), Box::new(x86::AL), Box::new(target)));
+        },
+        Prim2(op, box e1, box e2) if op.as_str() == "+" => {
             match (e1, e2) {
                 (Int(n1), Int(n2)) => {
                     code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(n1)), Box::new(target.clone())));
                     code.push( x86::Op2("addq".to_string(), Box::new(x86::Imm(n2)), Box::new(target)));
                 },
                 (Var(y), Int(n)) | (Int(n), Var(y)) => {
-                    if let x86::Var(x) = &target {
-                        if y.as_str() == x.as_str() {
-                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Imm(n)), Box::new(target)));
-                        } else {
-                            code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(n)), Box::new(target.clone())));
-                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y)), Box::new(target)));
-                        }
-                    } else {
-                        code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(n)), Box::new(target.clone())));
-                        code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y)), Box::new(target)));
-                    }
+                    code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y)), Box::new(target.clone())));
+                    code.push( x86::Op2("addq".to_string(), Box::new(x86::Imm(n)), Box::new(target)));
                 },
                 (Var(y), Var(z)) => {
-                    if let x86::Var(x) = &target {
-                        if y.as_str() == x.as_str() {
-                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z)), Box::new(target)));
-                        } else if z.as_str() == x.as_str() {
-                            code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y)), Box::new(target)));
-                        } else {
+                    match &target {
+                        x86::Var(x) => {
+                            if x.as_str() == y.as_str() {
+                                code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z)), Box::new(target)));
+                            } else if x.as_str() == z.as_str() {
+                                code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(y)), Box::new(target)));
+                            } else {
+                                code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y)), Box::new(target.clone())));
+                                code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z)), Box::new(target)));
+                            }
+                        },
+                        _ => { // 如果 target 是一个变量，就用上面的规则，否则，就用下面的规则
                             code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y)), Box::new(target.clone())));
                             code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z)), Box::new(target)));
                         }
-                    } else {
-                        code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y)), Box::new(target.clone())));
-                        code.push( x86::Op2("addq".to_string(), Box::new(x86::Var(z)), Box::new(target)));
                     }
                 }
                 _ => panic!("uncover"),
             }
         },
-        Prim1(neg, box e) if neg.as_str() == "-" => {
-            match e {
-                Int(n) => {
-                    code.push( x86::Op2("movq".to_string(), Box::new(x86::Imm(n)), Box::new(target.clone())) );
+        Prim1(op, box e) => {
+            match op.as_str() {
+                "-" => {
+                    code.push( x86::Op2("movq".to_string(), Box::new(simple_to_x86(e)), Box::new(target.clone())) );
                     code.push( x86::Op1("negq".to_string(), Box::new(target)));
-                },
-                Var(y) => {
-                    code.push( x86::Op2("movq".to_string(), Box::new(x86::Var(y)), Box::new(target.clone())) );
-                    code.push( x86::Op1("negq".to_string(), Box::new(target)));
-                },
+                }
+                "not" => {
+                    code.push( x86::Op2("movq".to_string(), Box::new(simple_to_x86(e)), Box::new(target.clone())) );
+                    code.push( x86::Op2("xorq".to_string(), Box::new(x86::Imm(1)), Box::new(target)) );
+                }
                 _ => panic!("bad syntax!"),
-            };
+            }
         },
         _ => panic!("Invalid form for assignment!"),
-        };
+    };
 }
 
+fn simple_to_x86(e: C0) -> x86 {
+    use C0::*;
+    match e {
+        Int(n) => x86::Imm(n),
+        Bool(true) => x86::Imm(1),
+        Bool(false) => x86::Imm(0),
+        Var(x) => x86::Var(x),
+        _ => panic!("not simple C0, please handle by yourself!"),
+    }
+}
 
-fn vars_c0_to_x86(locals: Vec<C0>) -> Vec<x86> {
-    let mut new_vars = vec![];
-    for x in locals.into_iter() {
-        if let C0::Var(x) = x {
-            new_vars.push( x86::Var(x) );
+// --------------------------------- topological sort --------------------------------
+use crate::tsort;
+pub fn uncover_live_prog(prog: &x86Program) -> HashMap<String, Vec<HashSet<&x86>>> {
+    use x86::*;
+    let cfg = &prog.cfg;
+    let mapping:     HashMap<usize, &String> = cfg.keys().enumerate().collect();
+    let mapping_rev: HashMap<&String, usize> = cfg.keys().zip(0..).collect();
+    // 获取边和后继关系
+    let mut successors = HashMap::new();
+    let mut edges = vec![];
+    for (label, instructions) in cfg {
+        for instr in instructions.iter() {
+            match instr {
+                Jmp(label_) | Jmpif(_, label_) if label_.as_str() != "conclusion" => {
+                    let from = *mapping_rev.get(label).unwrap();
+                    let to = *mapping_rev.get(label_).unwrap();
+                    edges.push( (from, to) );
+                    // successors
+                    let mut suc = successors.entry(from).or_insert(HashSet::new());
+                    suc.insert(to);
+                }
+                _ => (),
+            }
         }
     }
-    return new_vars;
+    let tsort_order = tsort::tsort(cfg.len(), edges);
+    let order = tsort_order.into_iter().rev();
+
+    // now we can deal with liveset with every block
+    let mut livesets = HashMap::new();
+    for id in order {
+        let label = *mapping.get(&id).unwrap();
+        let instructions = cfg.get(label).unwrap();
+        // what we need is merge successors live after set
+        let mut after: HashSet<&x86> = HashSet::new();
+        if let Some(set) = successors.get(&id) {
+            for successor_id in set {
+                let set_: &Vec<HashSet<&x86>> = livesets.get(successor_id).unwrap();
+                after = after.union(&set_[0]).cloned().collect();
+            }
+        }
+        let liveset = uncover_live(instructions, after);
+        livesets.insert(id, liveset);
+    }
+    // 我们的目的是返回一个完整的 live-after set
+    // return order.into_iter().map(|i| *mapping.get(&i).unwrap() ).collect();
+    // 最后，所有的liveset 按顺序合并在一起
+    let mut final_liveset = HashMap::new();
+    for (id, liveset) in livesets {
+        let label = mapping.get(&id).unwrap().clone().clone();
+        final_liveset.insert(label, liveset);
+    }
+    return final_liveset;
 }
 
-// --------------------------------- uncover-live ------------------------------------
-use std::collections::HashSet;
 
-pub fn uncover_live(instructions: &Vec<x86>) -> Vec<HashSet<&x86>> {
+// --------------------------------- uncover-live ------------------------------------
+
+pub fn uncover_live<'a>(instructions: &'a Vec<x86>, mut after: HashSet<&'a x86>) -> Vec<HashSet<&'a x86>> {
     let mut liveset = vec![];
-    let mut after = HashSet::new();
+    // let mut after = HashSet::new();
     for code in instructions.iter().rev() {
         let (read, write) = compute_RW(&code);
         let mut before: HashSet<&x86> = after.difference(&write).cloned().collect();
@@ -268,17 +458,29 @@ fn compute_RW(code: &x86) -> (HashSet<&x86>, HashSet<&x86>) {
     let mut read = HashSet::new();
     let mut write = HashSet::new();
     match code {
-        Op1(op, box e) if op.as_str() == "negq" => {
-            if is_var(e) { read.insert(e); write.insert(e); }
+        Op1(op, box e) => {
+            match op.as_str() {
+                "negq" =>  if is_var(e)  { read.insert(e); write.insert(e); } 
+                _ => unreachable!(),
+            }
         },
-        Op2(op, box e1, box e2) if op.as_str() == "addq" => {
-            if is_var(e1) { read.insert(e1); }
-            if is_var(e2) { read.insert(e2); write.insert(e2); } 
-        },
-        Op2(op, box e1, box e2) if op.as_str() == "movq" => {
-            if is_var(e1) { read.insert(e1); }
-            if is_var(e2) { write.insert(e2); }
-        },
+        Op2(op, box e1, box e2) => {
+            match op.as_str() {
+                "addq" | "xorq" => {
+                    if is_var(e1) { read.insert(e1); }
+                    if is_var(e2) { read.insert(e2); write.insert(e2); } 
+                },
+                "movq" | "movzbq" => {
+                    if is_var(e1) { read.insert(e1); }
+                    if is_var(e2) { write.insert(e2); }
+                },
+                "cmpq" => {
+                    if is_var(e1) { read.insert(e1); }
+                    if is_var(e2) { read.insert(e2); }
+                }
+                _ => unreachable!(),
+            }
+        }
         _ => ()
     }
     return (read, write);
@@ -290,7 +492,6 @@ fn is_var(expr: &x86) -> bool {
 }
 
 // ----------------- build interference -----------------------------------
-use std::collections::HashMap;
 pub struct Graph {
     move_related: HashMap<x86, x86>,
     nodes: HashSet<x86>,
@@ -421,55 +622,64 @@ fn callee_saved_register() -> HashSet<x86> {
     )
 }
 
-fn build_interference(block: &x86Block, liveset: Vec<HashSet<&x86>>) -> Graph {
+fn build_interference(block: &x86Program, livesets: HashMap<String, Vec<HashSet<&x86>>>) -> Graph {
     use x86::*;
     let mut graph = Graph::new();
 
+    // this is enough to using encoding
     for var in &block.locals {
         graph.add_node(var.clone());
     }
 
     let saved_register = caller_saved_register();
-    for (code, set) in block.instructions.iter().zip(liveset) {
-        match code {
-            Op1(op, box e) if is_arithmetic(op.as_str()) => {
-                for &v in set.iter() {
-                    if v == e { continue; }
-                    graph.add_edge(v, e);
-                }
-            },
-            Op2(op, box e1, box e2) if is_arithmetic(op.as_str()) => {
-                for &v in set.iter() {
-                    if v == e2 { continue; }
-                    graph.add_edge(v, e2);
-                }
-            },
-            Op2(op, box e1, box e2) if op.as_str() == "movq" => {
-                for &v in set.iter() {
-                    if v == e2 || v == e1 { continue; }
-                    graph.add_edge(e2, v);
-                    // for move relate
-                }
-                if is_var(e1) && is_var(e2) {
-                    graph.move_related.insert(e1.clone(), e2.clone());
-                    graph.move_related.insert(e2.clone(), e1.clone());
-                }
-            },
-            Callq(label) => {
-                for r in saved_register.iter() {
-                    for &v in set.iter() {
-                        graph.add_edge(r, v);
+    for (label, liveset) in livesets {
+        let codes = block.cfg.get(&label).unwrap();
+        for (code, set) in codes.iter().zip(liveset) {
+            match &code {
+                Op1(op, box e) => {
+                    match op.as_str() {
+                        "negq" => {
+                            for &v in set.iter() {
+                                if v == e { continue; }
+                                graph.add_edge(v, e);
+                            }
+                        }
+                        e => panic!("unknown instructions!"),
                     }
-                }
-            },
-            _ => (),
+                },
+                Op2(op, box e1, box e2) => {
+                    match op.as_str() {
+                        "addq" | "subq" | "cmpq" | "xorq" => {
+                            for &v in set.iter() {
+                                if v == e2 { continue; }
+                                graph.add_edge(v, e2);
+                            }
+                        },
+                        "movq" | "movzbq" => {
+                            for &v in set.iter() {
+                                if v == e2 || v == e1 { continue; }
+                                graph.add_edge(e2, v);
+                            }
+                            if is_var(e1) && is_var(e2) {
+                                graph.move_related.insert(e1.clone(), e2.clone());
+                                graph.move_related.insert(e2.clone(), e1.clone());
+                            }
+                        },
+                        e => panic!("unknown instructions!"),
+                    }
+                },
+                Callq(label) => {
+                    for r in saved_register.iter() {
+                        for &v in set.iter() {
+                            graph.add_edge(r, v);
+                        }
+                    }
+                },
+                _ => (),
+            }
         }
     }
     graph
-}
-
-fn is_arithmetic(op: &str) -> bool {
-    op == "negq" || op == "addq" || op == "subq" || op == "idivq"
 }
 
 // ---------------- color-graph -------------------------------------
@@ -503,9 +713,9 @@ fn spill_register(colormap: HashMap<x86, i8>) -> (HashMap<x86, x86>, usize) {
 }
 
 
-fn color_graph(block: &x86Block) -> (HashMap<x86, x86>, usize) {
-    let liveset = uncover_live(&block.instructions);
-    let mut graph = build_interference(block, liveset);
+fn color_graph(block: &x86Program) -> (HashMap<x86, x86>, usize) {
+    let livesets = uncover_live_prog(&block);
+    let mut graph = build_interference(block, livesets);
     graph.colorize();
     let colormap = graph.colors;
     spill_register(colormap) 
@@ -514,11 +724,11 @@ fn color_graph(block: &x86Block) -> (HashMap<x86, x86>, usize) {
 // ----------------- allocate-registers -----------------------------
 const BYTE: usize = 8;
 const FRAME: usize = 16;
-pub fn allocate_registers(block: x86Block) -> x86Block {
+pub fn allocate_registers(block: x86Program) -> x86Program {
     use x86::*;
     let (homesmap, n) = color_graph(&block);
 
-    let x86Block { instructions, locals, stack_space, name } = block;
+    let x86Program { cfg, stack_space, locals } = block;
     let stack_space = align_address(n * BYTE, FRAME);
 
     fn helper(expr: x86, homesmap: &HashMap<x86, x86>) -> x86 {
@@ -529,8 +739,12 @@ pub fn allocate_registers(block: x86Block) -> x86Block {
             e => e,
         }
     }
-    let instructions = instructions.into_iter().map(|code| helper(code, &homesmap)).collect();
-    x86Block { instructions, locals, stack_space, name }
+    let mut new_cfg = HashMap::new();
+    for (label, mut codes) in cfg {
+        codes = codes.into_iter().map(|code| helper(code, &homesmap)).collect(); 
+        new_cfg.insert(label, codes);
+    }
+    x86Program { cfg: new_cfg, locals, stack_space }
 }
 
 #[inline]
@@ -541,47 +755,65 @@ fn align_address(space: usize, align: usize) -> usize {
 
 
 // ---------------------------------- patch instructions ---------------------------------------------
-pub fn patch_instructions(block: x86Block) -> x86Block {
+// You Should not call this pass directly, though, no harm.
+pub fn patch_instructions(prog: x86Program) -> x86Program {
     use x86::*;
-    let x86Block { locals, instructions, stack_space, name } = block;
-    let mut new_instructions = vec![];
-    for instr in instructions.into_iter() {
-        match instr {
-            Op2(op, box Deref(box reg1, n1), box Deref(box reg2, n2)) if op.as_str() == "movq" => {
-                new_instructions.push( Op2(op.clone(), Box::new(Deref(Box::new(reg1), n1)), Box::new(RAX)));
-                new_instructions.push( Op2(op, Box::new(RAX), Box::new(Deref(Box::new(reg2), n2))));
-            },
-            Op2(op, box r1, box r2) if op.as_str() == "movq" && r1 == r2 => (),
-            // a little over engineering
-            Op2(op, box Imm(0), box r) if op.as_str() == "subq" || op.as_str() == "addq" => (),
-            e => new_instructions.push( e ),
-        }
+    let x86Program { locals, stack_space, cfg } = prog;
+    let mut new_cfg = HashMap::new();
+    for (label, codes) in cfg {
+        let mut new_codes = vec![];
+        for code in codes.into_iter() {
+            match code {
+                // move between two memory locations is not allowed
+                Op2(op, box Deref(box reg1, n1), box Deref(box reg2, n2)) if op.as_str() == "movq" => {
+                    new_codes.push( Op2(op.clone(), Box::new(Deref(Box::new(reg1), n1)), Box::new(RAX)));
+                    new_codes.push( Op2(op, Box::new(RAX), Box::new(Deref(Box::new(reg2), n2))));
+                },
+                // unless move
+                Op2(op, box r1, box r2) if op.as_str() == "movq" && r1 == r2 => (),
+                // a little over engineering, remove useless add or sub
+                Op2(op, box Imm(0), box r) if op.as_str() == "subq" || op.as_str() == "addq" => (),
+                // fix cmpq for two immediate 
+                Op2(op, box Imm(n), box Imm(m)) if op.as_str() == "cmpq" => {
+                    new_codes.push( Op2("movq".to_string(), Box::new(Imm(n)), Box::new(RAX)));
+                    new_codes.push( Op2(op, Box::new(RAX), Box::new(Imm(m))));
+                }
+                e => new_codes.push( e ),
+            }
+        }    
+        new_cfg.insert(label, new_codes);
     }
-    return x86Block { locals, instructions: new_instructions, stack_space, name };
+    return x86Program { cfg: new_cfg, locals, stack_space };
 }
 
-// ---------------------------------- print x86 ---------------------------------------------
+// // ---------------------------------- print x86 ---------------------------------------------
 use std::io::Write;
 use std::fs::File;
-pub fn print_x86(block: x86Block, filename: &str) -> std::io::Result<()> {
-    let mut prelude = build_prelude(block.stack_space, &block.name);
-    prelude = patch_instructions(prelude);
-    let mut conclusion = build_conclusion(block.stack_space);
-    conclusion = patch_instructions(conclusion);
+pub fn print_x86(mut prog: x86Program, filename: &str) -> std::io::Result<()> {
+    build_prelude(&mut prog);
+    build_conclusion(&mut prog);
+    prog = patch_instructions(prog);
 
     let mut file = File::create(filename)?;
     print_globl_entry(&mut file)?;
-    print_block(prelude, &mut file)?;
-    print_block(block, &mut file)?;
-    print_block(conclusion, &mut file)?;
+    print_x86program(prog, &mut file)?;
     return Ok(()); 
 }
 
-fn print_block(block: x86Block, file: &mut File) -> std::io::Result<()> {
-    let x86Block { locals, instructions, stack_space, name } = block;
-    file.write(name.as_bytes())?;
+
+fn print_x86program(prog: x86Program, file: &mut File) -> std::io::Result<()> {
+    for (label, codes) in prog.cfg {
+        print_block(label, codes, file)?;
+    }     
+    Ok(())
+}
+
+
+fn print_block(label: String, codes: Vec<x86>, file: &mut File) -> std::io::Result<()> {
+    file.write(label.as_bytes())?;
     file.write(b":\n")?;
-    print_instructions(instructions, file)?;
+    print_instructions(codes, file)?;
+    file.write(b"\n")?;
     Ok(())
 }
 
@@ -602,26 +834,26 @@ fn print_globl_entry(file: &mut File) -> std::io::Result<usize> {
     }
 }
 
-fn build_prelude(stack_space: usize, jump_to: &String) -> x86Block {
+fn build_prelude(prog: &mut x86Program) {
     use x86::*;
-    let name = "main".to_string();
+    let label = "main".to_string();
     let instructions = vec![
         Pushq(Box::new(RBP)),
         Op2("movq".to_string(), Box::new(RSP), Box::new(RBP)),
-        Op2("subq".to_string(), Box::new(Imm(stack_space as i64)), Box::new(RSP)),
-        Jmp(jump_to.to_string()),
+        Op2("subq".to_string(), Box::new(Imm(prog.stack_space as i64)), Box::new(RSP)),
+        Jmp("start".to_string()),
     ];
-    x86Block {name, instructions, stack_space:0, locals: vec![]}
+    prog.cfg.insert(label, instructions);
 }
 
-fn build_conclusion(stack_space: usize) -> x86Block {
+fn build_conclusion(prog: &mut x86Program) {
     use x86::*;
-    let name = "conclusion".to_string();
+    let label = "conclusion".to_string();
     let instructions = vec![
-        Op2("addq".to_string(), Box::new(Imm(stack_space as i64)), Box::new(RSP)),
+        Op2("addq".to_string(), Box::new(Imm(prog.stack_space as i64)), Box::new(RSP)),
         Popq(Box::new(RBP)),
         Retq,
     ];
-    x86Block {name, instructions, stack_space:0, locals:vec![]}
+    prog.cfg.insert(label, instructions);
 }
 

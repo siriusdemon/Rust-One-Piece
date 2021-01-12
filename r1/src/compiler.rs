@@ -41,7 +41,7 @@ pub fn remove_complex_opera(expr: Expr) -> Expr {
         },
         Prim0(op) => Prim0(op),
         Prim1(op, box e) => {
-            if is_prim1_or_prim2(&e) {
+            if is_complex(&e) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e)), Box::new(Prim1(op, Box::new(Var(x)))))
             } else {
@@ -49,11 +49,16 @@ pub fn remove_complex_opera(expr: Expr) -> Expr {
             }
         },
         Prim2(op, box e1, box e2) => {
-            if is_prim1_or_prim2(&e1) {
+            if is_complex(&e1) && is_complex(&e2) {
+                let (x, y) = (gensym(), gensym());
+                Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e1)), 
+                    Box::new( Let ( Box::new(Var(y.clone())), Box::new(remove_complex_opera(e2)), 
+                        Box::new(Prim2(op, Box::new(Var(x)), Box::new(Var(y)))))))
+            } else if is_complex(&e1) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e1)), 
                     Box::new(Prim2(op, Box::new(Var(x)), Box::new(remove_complex_opera(e2)))))
-            } else if is_prim1_or_prim2(&e2) {
+            } else if is_complex(&e2) {
                 let x = gensym();
                 Let ( Box::new(Var(x.clone())), Box::new(remove_complex_opera(e2)), 
                     Box::new(Prim2(op, Box::new(remove_complex_opera(e1)), Box::new(Var(x)))))
@@ -61,18 +66,21 @@ pub fn remove_complex_opera(expr: Expr) -> Expr {
                 Prim2(op, Box::new( remove_complex_opera(e1)), Box::new(remove_complex_opera(e2) ))
             }
         },
-        _ => panic!("should not reach!"),
+        e => { println!("{:?}", e); panic!("should not reach!"); }
     }
 }
 
 
-fn is_prim1_or_prim2(expr: &Expr) -> bool {
+fn is_complex(expr: &Expr) -> bool {
+    let any_let = Let(Box::new(Var(String::new())), Box::new(Int(1)), Box::new(Int(1)));
+    let any_prim0 = Prim0(String::new());
     let any_prim1 = Prim1(String::new(), Box::new(Int(1)));
     let any_prim2 = Prim2(String::new(), Box::new(Int(1)), Box::new(Int(1)));
+    mem::discriminant(expr) == mem::discriminant(&any_let)   ||
+    mem::discriminant(expr) == mem::discriminant(&any_prim0) ||
     mem::discriminant(expr) == mem::discriminant(&any_prim1) ||
-    mem::discriminant(expr) == mem::discriminant(&any_prim2)
+    mem::discriminant(expr) == mem::discriminant(&any_prim2) 
 }
-
 // ------------------------------ explicate control ------------------------
 use crate::syntax::{C0, C0Program};
 pub fn explicate_control(expr: Expr) -> C0Program {
@@ -111,19 +119,14 @@ pub fn flatten_seq(expr: C0) -> C0 {
 
 pub fn flatten_seq_helper(expr: C0, stack: &mut Vec<C0>) -> C0 {
     use C0::*;
-    let any_seq = Seq(Box::new(Int(1)), Box::new(Int(2)));
     match expr {
         Seq(box Assign(box x, box e), box tail) => {
-            let assign = if mem::discriminant(&e) == mem::discriminant(&any_seq) {
-                let e = flatten_seq_helper(e, stack);
-                Assign(Box::new(x), Box::new(e))
-            } else {
-                Assign(Box::new(x), Box::new(e))
-            };
+            let e = flatten_seq_helper(e, stack);
+            let assign = Assign(Box::new(x), Box::new(e));
             stack.push(assign);
             return flatten_seq_helper(tail, stack);
         }
-        _ => expr,
+        e => e,
     }
 }
 
@@ -143,7 +146,8 @@ pub fn select_instruction(prog: C0Program) -> x86Block {
     let C0Program { locals, mut cfg } = prog;
     let (label, codes_C0) = cfg.pop().unwrap();
     let instructions = C0_to_x86(codes_C0);
-    let x86_block = x86Block { instructions, locals: vars_c0_to_x86(locals), stack_space: 0, name: "start".to_string() };
+    let locals = vars_c0_to_x86(locals);
+    let x86_block = x86Block { instructions, locals, stack_space: 0, name: "start".to_string() };
     return x86_block;
 }
 
@@ -230,15 +234,15 @@ fn assign_helper(source: C0, target: x86, code: &mut Vec<x86>) {
             };
         },
         _ => panic!("Invalid form for assignment!"),
-        };
+    };
 }
 
 
 fn vars_c0_to_x86(locals: Vec<C0>) -> Vec<x86> {
     let mut new_vars = vec![];
-    for x in locals.iter() {
+    for x in locals.into_iter() {
         if let C0::Var(x) = x {
-            new_vars.push( x86::Var(x.to_string()));
+            new_vars.push( x86::Var(x) );
         }
     }
     return new_vars;
@@ -274,9 +278,9 @@ fn assign_homes_helper(instr: Vec<x86>, symtable: &SymTable<&x86, x86>) -> Vec<x
     use x86::*;
     fn helper(expr: x86, symtable: &SymTable<&x86, x86>) -> x86 {
         match expr {
-            Var(x)  => symtable.map.get(&Var(x.to_string())).unwrap().clone(),
-            Op1(op, box e) => Op1(op.to_string(), Box::new(helper(e, symtable))),
-            Op2(op, box e1, box e2) => Op2(op.to_string(), Box::new(helper(e1, symtable)), Box::new(helper(e2, symtable))),
+            Var(x)  => symtable.map.get(&Var(x)).unwrap().clone(),
+            Op1(op, box e) => Op1(op, Box::new(helper(e, symtable))),
+            Op2(op, box e1, box e2) => Op2(op, Box::new(helper(e1, symtable)), Box::new(helper(e2, symtable))),
             e => e,
         }
     }

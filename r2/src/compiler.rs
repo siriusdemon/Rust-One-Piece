@@ -38,8 +38,14 @@ pub fn shrink(expr: Expr) -> Expr {
                     Let(Box::new(x.clone()), Box::new(e2),
                         Box::new(Prim2("<".to_string(), Box::new(x), Box::new(e1))))
                 }
-                op => Prim2(op.to_string(), Box::new(shrink(e1)), Box::new(shrink(e2)))
+                _ => Prim2(op, Box::new(shrink(e1)), Box::new(shrink(e2)))
             }
+        }
+        Let(x, box e, box body) => {
+            Let(x, Box::new(shrink(e)), Box::new(shrink(body)))
+        }
+        If(box e, box e2, box e3) => {
+            If(Box::new(shrink(e)), Box::new(shrink(e2)), Box::new(shrink(e3)))
         }
         e => e
     }
@@ -137,14 +143,14 @@ fn is_complex(expr: &Expr) -> bool {
 // ------------------------------ explicate control ------------------------
 use crate::syntax::{C0, C0Program};
 pub fn explicate_control(expr: Expr) -> C0Program {
-    let mut cfg = vec![];
+    let mut cfg = HashMap::new();
     let mut locals = HashSet::new();
     let expr = explicate_tail(expr, &mut cfg, &mut locals);
-    cfg.push(("start".to_string(), expr));
+    cfg.insert("start".to_string(), expr);
     C0Program { locals, cfg }
 }
 
-fn explicate_tail(expr: Expr, cfg: &mut Vec<(String, C0)>, locals: &mut HashSet<C0>) -> C0 {
+fn explicate_tail(expr: Expr, cfg: &mut HashMap<String, C0>, locals: &mut HashSet<C0>) -> C0 {
     match expr {
         Let(box Var(x), box e, box body) => {
             let tail = explicate_tail(body, cfg, locals);
@@ -163,7 +169,7 @@ fn explicate_tail(expr: Expr, cfg: &mut Vec<(String, C0)>, locals: &mut HashSet<
     }
 }
 
-fn explicate_assign(x: C0, expr: Expr, tail: C0, locals: &mut HashSet<C0>, cfg: &mut Vec<(String, C0)>) -> C0 {
+fn explicate_assign(x: C0, expr: Expr, tail: C0, locals: &mut HashSet<C0>, cfg: &mut HashMap<String, C0>) -> C0 {
     use C0::{Assign, Seq};
     match expr {
         Let(box Var(x_), box e, box body) => {
@@ -187,7 +193,7 @@ fn explicate_assign(x: C0, expr: Expr, tail: C0, locals: &mut HashSet<C0>, cfg: 
     }
 }
 
-fn explicate_pred(cond: Expr, then: C0, else_: C0, locals: &mut HashSet<C0>, cfg: &mut Vec<(String, C0)>) -> C0 {
+fn explicate_pred(cond: Expr, then: C0, else_: C0, locals: &mut HashSet<C0>, cfg: &mut HashMap<String, C0>) -> C0 {
     // e, boolean, if, or cmp
     match cond {
         Bool(true) => then,
@@ -231,12 +237,65 @@ fn expr_to_C0(expr: Expr) -> C0 {
 }
 
 
-fn attach_block(expr: C0, cfg: &mut Vec<(String, C0)>) -> C0 {
+fn attach_block(expr: C0, cfg: &mut HashMap<String, C0>) -> C0 {
     let label = gensym();
-    cfg.push((label.clone(), expr));
+    cfg.insert(label.clone(), expr);
     return C0::Goto(label);
 }
- 
+
+// ----------------- optimize jump ----------------------------------------
+// remove trivial block
+fn get_shortcut(prog: &C0Program) -> HashMap<String, String> {
+    // 跳往 key 的人，应该跳往 value
+    let mut shortcut = HashMap::new();
+    for (label, code) in &prog.cfg {
+        if let C0::Goto(ref lab) = &code {
+            let mut target = lab.clone();
+            while let C0::Goto(ref lab_) = &prog.cfg.get(&target).unwrap() {
+                target = lab_.to_string();
+            }
+            shortcut.insert(label.clone(), target);
+        } 
+    }
+    return shortcut;
+}
+
+
+pub fn optimize_jumps(mut prog: C0Program) -> C0Program {
+    use C0::*;
+    let shortcut = get_shortcut(&prog);
+    let C0Program { cfg, locals } = prog;
+    let mut new_cfg = HashMap::new();
+    for (label, code) in cfg.into_iter() {
+        let code = optimize_jumps_helper(&label, code, &shortcut);
+        // now, code should not be Just Goto!
+        if label.as_str() == "start" || mem::discriminant(&code) != mem::discriminant(&Goto(String::new())) {
+            new_cfg.insert(label, code);
+        }
+    }
+    C0Program { cfg: new_cfg, locals }
+}
+
+fn optimize_jumps_helper(label: &String, code: C0, shortcut: &HashMap<String, String>) -> C0 {
+    use C0::*;
+    match code {
+        Seq(box assign, box tail) => {
+            let tail = optimize_jumps_helper(label, tail, shortcut);
+            let seq = Seq(Box::new(assign), Box::new(tail));
+            return seq;
+        },
+        Goto(lab) => match shortcut.get(&lab) {
+            None => Goto(lab),
+            Some(lab_) => Goto(lab_.to_string()),
+        },
+        If(box c, box e1, box e2) => {
+            If(Box::new(c), Box::new(optimize_jumps_helper(label, e1, shortcut)),
+                            Box::new(optimize_jumps_helper(label, e2, shortcut)))
+        },
+        e => e,
+    }    
+}
+
 // ----------------- select instructions -----------------------------------
 use crate::syntax::{x86, x86Program};
 pub fn select_instruction(prog: C0Program) -> x86Program {
@@ -281,7 +340,7 @@ fn pred_helper(expr: C0, then: String, else_: String, code: &mut Vec<x86>) {
     use C0::*;
     match expr {
         Var(x) => {
-            code.push( x86::Op2("cmpq".to_string(), Box::new(x86::Var(x)), Box::new(x86::Imm(1))) );
+            code.push( x86::Op2("cmpq".to_string(), Box::new(x86::Imm(1)), Box::new(x86::Var(x))) );
             code.push( x86::Jmpif("e".to_string(), then) );
             code.push( x86::Jmp(else_) );
         }
@@ -380,7 +439,9 @@ fn simple_to_x86(e: C0) -> x86 {
     }
 }
 
-// --------------------------------- topological sort --------------------------------
+// --------------------------------- remove-jump ------------------------------------
+
+// --------------------------------- uncover-live ------------------------------------
 use crate::tsort;
 pub fn uncover_live_prog(prog: &x86Program) -> HashMap<String, Vec<HashSet<&x86>>> {
     use x86::*;
@@ -436,7 +497,6 @@ pub fn uncover_live_prog(prog: &x86Program) -> HashMap<String, Vec<HashSet<&x86>
 }
 
 
-// --------------------------------- uncover-live ------------------------------------
 
 pub fn uncover_live<'a>(instructions: &'a Vec<x86>, mut after: HashSet<&'a x86>) -> Vec<HashSet<&'a x86>> {
     let mut liveset = vec![];
@@ -492,120 +552,15 @@ fn is_var(expr: &x86) -> bool {
 }
 
 // ----------------- build interference -----------------------------------
-pub struct Graph {
-    move_related: HashMap<x86, x86>,
-    nodes: HashSet<x86>,
-    edges: HashMap<x86, HashSet<x86>>,
-    colors: HashMap<x86, i8>,
-    saturation: HashMap<x86, HashSet<i8>>,
-}
-
-impl Graph {
-    pub fn new() -> Self {
-        Graph { 
-            nodes: HashSet::new(), edges: HashMap::new(), colors: HashMap::new(), 
-            saturation: HashMap::new(), move_related: HashMap::new(),
-        } 
-    }
-    #[inline]
-    fn add_node(&mut self, node: x86) -> bool {
-        self.nodes.insert(node)
-    }
-    pub fn add_edge(&mut self, v1: &x86, v2: &x86) {
-        use x86::*;
-        if v2 != &x86::RAX {
-            let mut set1 = self.edges.entry(v1.clone()).or_insert(HashSet::new());
-            set1.insert(v2.clone());
-        }
-        if v1 != &x86::RAX {
-            let mut set2 = self.edges.entry(v2.clone()).or_insert(HashSet::new());
-            set2.insert(v1.clone());
-        }
-    }
-    fn most_saturation(&mut self) -> x86 {
-        let mut most = 0;
-        let mut k = &x86::Imm(42);
-        for key in &self.nodes {
-            let cur = self.saturation.get(key).unwrap().len();
-            if cur >= most {
-                k = key;
-                most = cur; 
-            }
-        }
-        k.clone()
-    }
-    fn find_min_available(&self, mut colors: Vec<i8>) -> i8 {
-        let mut ret = 0;
-        colors.sort();
-        for c in colors.into_iter() {
-            if ret < c {
-                return ret;
-            } else {
-                ret = c + 1;
-            }
-        }
-        return ret;
-    }
-    fn select_color(&self, node: &x86) -> i8 {
-        let neighbors = self.edges.get(node);
-        match neighbors {
-            None => 0,
-            Some(neighbors) => {
-                let relate = self.try_move_relate(node);
-                if relate != -1 { return relate; }
-                let ncolors: Vec<i8> = neighbors.iter().map(|k| self.colors.get(k).unwrap().to_owned()).collect();
-                self.find_min_available(ncolors)
-            }
-        }
-    }
-    fn try_move_relate(&self, node: &x86) -> i8 {
-        let x = self.move_related.get(node);
-        match x {
-            None => -1,  // no relate
-            Some(rel) => {
-                match self.edges.get(node) {
-                    None => -1,
-                    Some(set) => if set.contains(rel) { -1 } else { *self.colors.get(rel).unwrap() }
-                }
-            }
-        }
-    }
-    fn init_saturation(&mut self) {
-        for node in &self.nodes {
-            self.saturation.entry(node.clone()).or_insert(HashSet::new());
-        }
-    }
-    fn init_colors(&mut self) {
-        for node in &self.nodes {
-            self.colors.entry(node.clone()).or_insert(-1);
-        }
-    }
-    fn update_saturation(&mut self, node: &x86, color: i8) {
-        match self.edges.get(node) {
-            None => (),
-            Some(neighbors) => {
-                for key in neighbors.iter() {
-                    let mut saturation = self.saturation.get_mut(key).unwrap();
-                    saturation.insert(color);
-                }
-            }
-        }
-    }
-    pub fn colorize(&mut self) {
-        self.init_saturation();
-        self.init_colors();
-        // println!("move related {:?}", self.move_related);
-        // println!("edges {:?}", self.edges.keys());
-        while self.nodes.len() > 0 {
-            let t = self.most_saturation();
-            self.nodes.remove(&t);
-            let color = self.select_color(&t);
-            self.update_saturation(&t, color);
-            self.colors.insert(t, color);
-        }
-    }
-}
-
+// 着色器算法
+// 输入： locals, cfg, livesets
+// 输出： 每个 locals 对应的寄存器标号 HashMap<x86, i8>
+// 算法:
+//      遍历 livesets 和 cfg，根据 op 的类型，记录变量间的关系
+//      使用着色器分配算法，选出当前饱和度最高的一个变量
+//      给当前变量分配一个最低的寄存器号，如果它有 move_related 的寄存器标号且不与它本身冲突，则使用之
+//      更新与它相邻的其他变量的饱和度
+//      重复以上三个步骤，直到所有的变量都完成分配
 fn caller_saved_register() -> HashSet<x86> {
     use crate::hashset;
     hashset!(
@@ -622,16 +577,108 @@ fn callee_saved_register() -> HashSet<x86> {
     )
 }
 
-fn build_interference(block: &x86Program, livesets: HashMap<String, Vec<HashSet<&x86>>>) -> Graph {
-    use x86::*;
-    let mut graph = Graph::new();
 
-    // this is enough to using encoding
-    for var in &block.locals {
-        graph.add_node(var.clone());
+pub struct Graph {
+    nodes: HashSet<x86>,                        // 图中节点
+    move_related: HashMap<x86, x86>,            // 相互转移关系
+    adjacent: HashMap<x86, HashSet<x86>>,       // 邻接表
+    saturation: HashMap<x86, HashSet<i8>>,      // 每个节点的饱和度
+    colors: HashMap<x86, i8>                    // 每个节点的颜色
+}
+
+impl Graph {
+
+    pub fn new(nodes: &HashSet<x86>) -> Self {
+        let nodes = nodes.clone();
+        let move_related = HashMap::new();
+        let adjacent = nodes.iter().map(|node| (node.clone(), HashSet::new())).collect();
+        let saturation = nodes.iter().map(|node| (node.clone(), HashSet::new())).collect();
+        let colors = nodes.iter().map(|node| (node.clone(), -1)).collect();
+        Graph { nodes, move_related, adjacent, saturation, colors } 
     }
 
-    let saved_register = caller_saved_register();
+    pub fn add_edge(&mut self, v1: &x86, v2: &x86) {
+        use x86::*;
+        if is_var(v2) {
+            let mut set1 = self.adjacent.get_mut(v1).unwrap();
+            set1.insert(v2.clone());
+        }
+        if is_var(v1) {
+            let mut set2 = self.adjacent.get_mut(v2).unwrap();
+            set2.insert(v1.clone());
+        }
+    }
+
+    fn most_saturation(&mut self) -> x86 {
+        let mut most = 0;
+        let mut k = &x86::Imm(42);
+        for key in &self.nodes {
+            let cur = self.saturation.get(key).unwrap().len();
+            if cur >= most {
+                k = key;
+                most = cur; 
+            }
+        }
+        assert_ne!(k, &x86::Imm(42));
+        return k.clone();
+    }
+
+    fn find_min_available(&self, mut colors: Vec<i8>) -> i8 {
+        let mut ret = 0;
+        colors.sort();
+        for c in colors.into_iter() {
+            if ret < c {
+                return ret;
+            } else {
+                ret = c + 1;
+            }
+        }
+        return ret;
+    }
+
+    fn select_color(&self, node: &x86) -> i8 {
+        let neighbors = self.adjacent.get(node).unwrap();
+        let relate = self.try_move_relate(node);
+        if relate != -1 { return relate; }
+        let ncolors: Vec<i8> = neighbors.iter().map(|k| self.colors.get(k).unwrap().to_owned()).collect();
+        self.find_min_available(ncolors)
+    }
+
+    fn try_move_relate(&self, node: &x86) -> i8 {
+        let x = self.move_related.get(node);
+        match x {
+            None => -1,  // no relate
+            Some(rel) => {
+                let neighbors = self.adjacent.get(node).unwrap();
+                if neighbors.contains(rel) { -1 } else { *self.colors.get(rel).unwrap() }
+            }
+        }
+    }
+
+    fn update_saturation(&mut self, node: &x86, color: i8) {
+        let neighbors = self.adjacent.get(node).unwrap();
+        for key in neighbors.iter() {
+            let mut saturation = self.saturation.get_mut(key).unwrap();
+            saturation.insert(color);
+        }
+    }
+
+    pub fn colorize(&mut self) {
+        while self.nodes.len() > 0 {
+            let t = self.most_saturation();
+            self.nodes.remove(&t);
+            let color = self.select_color(&t);
+            self.update_saturation(&t, color);
+            self.colors.insert(t, color);
+        }
+    }
+}
+
+
+fn build_interference(block: &x86Program, livesets: HashMap<String, Vec<HashSet<&x86>>>) -> Graph {
+    use x86::*;
+    let mut graph = Graph::new(&block.locals);
+
     for (label, liveset) in livesets {
         let codes = block.cfg.get(&label).unwrap();
         for (code, set) in codes.iter().zip(liveset) {
@@ -669,6 +716,7 @@ fn build_interference(block: &x86Program, livesets: HashMap<String, Vec<HashSet<
                     }
                 },
                 Callq(label) => {
+                    let saved_register = caller_saved_register();
                     for r in saved_register.iter() {
                         for &v in set.iter() {
                             graph.add_edge(r, v);
@@ -774,9 +822,9 @@ pub fn patch_instructions(prog: x86Program) -> x86Program {
                 // a little over engineering, remove useless add or sub
                 Op2(op, box Imm(0), box r) if op.as_str() == "subq" || op.as_str() == "addq" => (),
                 // fix cmpq for two immediate 
-                Op2(op, box Imm(n), box Imm(m)) if op.as_str() == "cmpq" => {
+                Op2(op, box x, box Imm(n)) if op.as_str() == "cmpq" => {
                     new_codes.push( Op2("movq".to_string(), Box::new(Imm(n)), Box::new(RAX)));
-                    new_codes.push( Op2(op, Box::new(RAX), Box::new(Imm(m))));
+                    new_codes.push( Op2(op, Box::new(x), Box::new(RAX)));
                 }
                 e => new_codes.push( e ),
             }
@@ -839,6 +887,10 @@ fn build_prelude(prog: &mut x86Program) {
     let label = "main".to_string();
     let instructions = vec![
         Pushq(Box::new(RBP)),
+        Pushq(Box::new(R12)),
+        Pushq(Box::new(R13)),
+        Pushq(Box::new(R14)),
+        Pushq(Box::new(RBX)),
         Op2("movq".to_string(), Box::new(RSP), Box::new(RBP)),
         Op2("subq".to_string(), Box::new(Imm(prog.stack_space as i64)), Box::new(RSP)),
         Jmp("start".to_string()),
@@ -851,6 +903,10 @@ fn build_conclusion(prog: &mut x86Program) {
     let label = "conclusion".to_string();
     let instructions = vec![
         Op2("addq".to_string(), Box::new(Imm(prog.stack_space as i64)), Box::new(RSP)),
+        Popq(Box::new(RBX)),
+        Popq(Box::new(R14)),
+        Popq(Box::new(R13)),
+        Popq(Box::new(R12)),
         Popq(Box::new(RBP)),
         Retq,
     ];

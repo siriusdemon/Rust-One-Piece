@@ -24,7 +24,7 @@ pub fn is_digit(s: &str) -> bool {
 
 pub fn gensym() -> String {
     use uuid::Uuid;
-    let uid = Uuid::new_v4().to_string()[..8].to_string();
+    let uid = Uuid::new_v4().to_string()[..4].to_string();
     let mut s = String::from("tmp");
     s.push_str(&uid);
     return s;

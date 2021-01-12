@@ -23,7 +23,7 @@ pub fn parse_list(expr: &str) -> Sexpr {
             }
             '0'..='9' => sym.push(c),
             '+'|'-'|'*'|'/' => sym.push(c),
-            '<'|'='|'>'|'?'|'#'|'!' => sym.push(c),
+            '<'|'='|'>'|'?'|'#'|'!'|'_' => sym.push(c),
             'a'..='z'|'A'..='Z' => sym.push(c),
             ' ' => if !sym.is_empty() { list.push(Atom(sym)); sym = String::new(); }
             ')' => {
@@ -50,6 +50,7 @@ pub fn parse_sexpr(sexpr: &Sexpr) -> Expr {
             if is_digit(s) { Int(s.parse().unwrap())} 
             else if s == "#t" { Bool(true) }
             else if s == "#f" { Bool(false) }
+            else if s == "void" { Void }
             else { Var(s.to_string()) } 
         }
         List(v) => match v.as_slice() {
@@ -89,21 +90,31 @@ pub fn parse_sexpr(sexpr: &Sexpr) -> Expr {
                     let e = parse_sexpr(e);
                     v.push(e);
                 }
-                Reference(Rc::new(RefCell::new(Vector(v))))
+                PrimN(op.to_string(), v)
             }
             // vector-ref
             [Atom(op), e, index] if op == "vector-ref" => {
                 let index = parse_sexpr(index);
                 let e = parse_sexpr(e);
-                Prim2("vector-ref".to_string(), Box::new(e), Box::new(index))
+                Prim2(op.to_string(), Box::new(e), Box::new(index))
             }
             // vector-set!
             [Atom(op), e1, index, e2] if op == "vector-set!" => {
                 let e1 = parse_sexpr(e1);
                 let index = parse_sexpr(index);
                 let e2 = parse_sexpr(e2);
-                Prim3("vector-set!".to_string(), Box::new(e1), Box::new(index), Box::new(e2))
+                Prim3(op.to_string(), Box::new(e1), Box::new(index), Box::new(e2))
             }
+            // just for testing
+            [Atom(op), Atom(cvar)] if op == "global-value" => {
+                _GlobalValue(cvar.to_string())
+            },
+            [Atom(op), Atom(size)] if op == "collect" => {
+                _Collect(size.parse().unwrap())
+            },
+            [Atom(op), Atom(size)] if op == "allocate" => {
+                _Allocate(size.parse().unwrap(), RType::Vector)
+            },
             e => {
                 println!("{:?}", e);
                 panic!("Invalid syntax!");

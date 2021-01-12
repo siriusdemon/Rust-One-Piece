@@ -177,33 +177,48 @@ fn test_uniquify() {
 #[test]
 fn test_remove_complex_opera() {
     let e = "(+ 10 (- 8))";
+    // e will be (let (x (- 8)
+    //              (+ 10 x)))
     let exp = parse(e);
+    let exp = type_checker(exp);
+    let mut locals = hashmap!();
+    let exp = expose_allocation(exp, &mut locals);
     let exp = remove_complex_opera(exp);
-    if let Let(box Var(x), box Prim1(_sub, box Int(n)), box Prim2(_add, box Int(n1), box Var(x1))) = &exp {
-        assert_eq!(x, x1);
-        assert_eq!(n, &8);
-        assert_eq!(n1, &10);
+    if let Hastype(box let_, t) = exp {
+        assert_eq!(t, Integer);
+        if let Let(box x, box e, box body) = let_ {
+            assert!(matches!(e, Hastype(box Prim1(neg, box Hastype(box i, itype)), t) 
+                if itype == Integer && neg.as_str() == "-" && t == Integer && i == Int(8)));
+        } else {
+            panic!("Failed!");
+        }
     } else {
-        panic!("remove_complex_opera fails!");
+        panic!("Failed!");
     }
-    assert_eq!(interp_r2(exp), Int(2));
 }
 #[test]
 fn test_remove_complex_opera2() {
     let e = "(+ (+ 10 32) (+ 39 3))";
+    // e = (let (x (+ 10 32))
+    //     (let (y (+ 39 3))
+    //        (+ x y)))
     let exp = parse(e);
+    let exp = type_checker(exp);
+    let mut locals = hashmap!();
+    let exp = expose_allocation(exp, &mut locals);
     let exp = remove_complex_opera(exp);
-    if let Let(box Var(x), box Prim2(_add, box Int(n10), box Int(n32)), 
-        box Let(box Var(y), box Prim2(add, box Int(n39), box Int(n3)), 
-            box Prim2(add_, box Var(x_), box Var(y_)))) = &exp {
-        assert_eq!(x, x_);
-        assert_eq!(y, y_);
-        assert_eq!(n3, &3);
-    } else {
-        panic!("remove_complex_opera fails!");
-    }
-    assert_eq!(interp_r2(exp), Int(84));
+    println!("{}", exp);
+    assert!(matches!(exp, 
+        Hastype(box 
+            Let(box x, box plus1, box Hastype(box 
+                Let(box y, box plus2, box ret),
+                t2)
+            ),
+            t1)
+        if t1 == Integer && t2 == Integer
+    ));
 }
+
 use crate::syntax::{C0Program, C0};
 #[test]
 fn test_explicate_control() {
@@ -211,10 +226,32 @@ fn test_explicate_control() {
     let e = "(let (x (+ 1 2))
                 x)";
     let exp = parse(e);
+    let exp = type_checker(exp);
     let exp = explicate_control(exp);
     let C0Program { locals, cfg: mut blocks } = exp;
     let codes = blocks.get("start").unwrap();
     assert!(matches!(&codes, Seq(box Assign(box Var(x), box Prim2(add, box Int(n1), box Int(n2))), box Return(box Var(x_))) if x == x_));
+}
+#[test]
+fn test_explicate_control2() {
+    // just make sure it pass
+    use C0::*;
+    // let e = "(let (x (vector 42 (vector 10)))
+    //          (let (y (vector-ref x 1))
+    //             (vector-set! y 0 #t)))";
+    // let e = "(let (x 1)
+    //          (let (y 2)
+    //            (+ x y)))";
+    let e = "(let (x (vector 42))
+                (vector-ref x 0))";
+    let exp = parse(e);
+    let exp = type_checker(exp);
+    let exp = shrink(exp);
+    let mut locals = hashmap!();
+    let exp = expose_allocation(exp, &mut locals);
+    let exp = remove_complex_opera(exp);
+    println!("{}", exp);
+    let _exp = explicate_control(exp);
 }
 
 use crate::syntax::{x86, x86Program};
@@ -361,64 +398,67 @@ fn test_type_checker() {
     let exp = "(let (x 10) 
                    (+ x 29))";
     let exp = parse(exp);
-    let etype = type_checker(&exp);
-    assert_eq!(etype, Integer);
+    let exp = type_checker(exp);
+    assert!(matches!(exp, Hastype(box _e, t) if t == Integer));
     let exp = "(- 10 20)";
     let exp = parse(exp);
-    let etype = type_checker(&exp);
-    assert_eq!(Integer, etype);
+    let exp = type_checker(exp);
+    assert!(matches!(exp, Hastype(box _e, t) if t == Integer));
 }
 #[test]
 #[should_panic]
 fn test_type_checker2() {
     let exp = "(if (not 1) #t #f)";
     let exp = parse(exp);
-    let etype = type_checker(&exp);
+    let _exp = type_checker(exp);
+    println!("{:?}", _exp);
 }
 #[test]
 fn test_type_checker3() {
     let exp = "(and (> 10 20) (eq? 10 42))";
     let exp = parse(exp);
-    let etype = type_checker(&exp);
-    assert_eq!(etype, Boolean);
+    let exp = type_checker(exp);
+    assert!(matches!(exp, Hastype(box _e, t) if t == Boolean));
 }
 #[test]
 fn test_vector_type() {
     let e = "(let (c (vector 1 2))
                 c)";
     let e = parse(e);
-    let etype = type_checker(&e);
-    assert_eq!(etype, RType::Vector);
+    let e = type_checker(e);
+    assert!(matches!(e, Hastype(box _e, t) if t == RType::Vector));
 }
 #[test]
 fn test_void_type() {
     let e = "(let (c (vector 1 2))
                 (vector-set! c 0 42))";
     let e = parse(e);
-    let etype = type_checker(&e);
-    assert_eq!(etype, RType::Void);
-}
-#[test]
-fn test_shrink2() {
-    fn helper(e: &str, expect: Expr) {
-        let exp = parse(e);
-        let exp = shrink(exp);
-        let res = interp_r2(exp);
-        assert_eq!(res, expect);
-    }
-    helper("(>= 3 3)", Bool(true));
-    helper("(or #f #t", Bool(true));
-    helper("(and #t #t", Bool(true));
-    helper("(- 10 30)", Int(-20));
-    helper("(<= 4 3)", Bool(false));
-    helper("(and (> 100 20) (eq? 10 42))", Bool(false));
+    let e = type_checker(e);
+    assert!(matches!(e, Hastype(box _e, t) if t == RType::Void));
 }
 #[test]
 fn test_shrink3() {
     let s = "(- 10 20)";
     let e = parse(s);
+    let e = type_checker(e);
     let e = shrink(e);
-    matches!(e, Prim2(op, box Int(n10), box Prim1(op2, box Int(n20))) if n10 == 10 && op2.as_str() == "-");
+    assert!(matches!(e, 
+        Hastype(box Prim2(op, box Hastype(box Int(n10), Integer), box 
+            Hastype(box Prim1(op2, box Hastype(box Int(n20), Integer)), Integer)), Integer)
+        if n10 == 10 && op2.as_str() == "-"));
+}
+#[test]
+fn test_shrink4() {
+    let e = "(if #f (- 10 20) 42)";
+    let e = parse(e);
+    let e = type_checker(e);
+    let e = shrink(e);
+    println!("{:?}", e);
+    assert!(matches!(e, 
+        Hastype(box If(box Hastype(box Bool(false), Boolean), box
+            Hastype(box Prim2(op, box Hastype(box Int(n10), Integer), box 
+                Hastype(box Prim1(op2, box Hastype(box Int(n20), Integer)), Integer)), Integer), box
+            Hastype(box Int(42), Integer)), Integer)));
 }
 #[test]
 fn test_optimize_jump() {
@@ -471,3 +511,36 @@ fn test_interp_r3() {
                 (vector-ref y 0)))";
     helper(e, Int(42));
 }
+#[test]
+fn test_unseen_syntax() {
+    let e = "(global-value free_ptr)";
+    let e = parse(e);
+    let ans = _GlobalValue("free_ptr".to_string());
+    assert_eq!(ans, e);
+    let e = "(collect 1024)";
+    let e = parse(e);
+    let ans = _Collect(1024);
+    assert_eq!(ans, e);
+    let e = "(allocate 1024)";
+    let e = parse(e);
+    let ans = _Allocate(1024, RType::Vector);
+    assert_eq!(ans, e);
+}
+// So, test by eye
+// #[test]
+// fn test_expose_allocation() {
+//     let e = "(vector 42)";
+//     let e = parse(e);
+//     let e = shrink(e);
+//     let e = expose_allocation(e);
+//     let answer =  "(let (_tmp 42)
+//                    (let (_ (if (< (+ (global-value free_ptr) 16)
+//                                   (global-value fromspace_end))
+//                              void
+//                              (collect 16)))
+//                    (let (v (allocate 1))
+//                    (let (_ (vector-set! v 0 42))
+//                      v))))";
+//     let answer = parse(answer);
+//     assert_eq!(answer, e);
+// }

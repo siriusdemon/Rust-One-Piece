@@ -23,19 +23,31 @@ pub fn is_digit(s: &str) -> bool {
 
 pub fn gensym() -> String {
     use uuid::Uuid;
-    return Uuid::new_v4().to_string()[..8].to_string();
+    let uid = Uuid::new_v4().to_string()[..8].to_string();
+    let mut s = String::from("tmp");
+    s.push_str(&uid);
+    return s;
 }
 
 pub fn is_arithmetic(op: &str) -> bool {
-    op == "-" || op == "+" || op == "*" || op == "/"
+    match op {
+        "-" | "+" | "*" | "/" => true,
+        _ => false,
+    }
 }
 
 pub fn is_cmp(op: &str) -> bool {
-    op == "<=" || op == ">=" || op == "eq?" || op == "<" || op == ">"
+    match op {
+        "<=" | ">=" | "eq?" | "<" | ">" => true,
+        _ => false,
+    }
 }
 
 pub fn is_logical(op: &str) -> bool {
-    op == "and" || op == "or" || op == "not"
+    match op {
+        "and" | "or" | "not" => true,
+        _ => false,
+    }
 }
 
 // --------------------- Macro ------------------------

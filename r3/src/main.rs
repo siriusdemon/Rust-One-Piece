@@ -78,6 +78,10 @@ fn interp_exp(expr: Expr, env: Rc<SymTable<String, Expr>>) -> Expr {
                 }
             }
         }
+        PrimN(op, exprs) if op.as_str() == "vector" => {
+            let exprs: Vec<Expr> = exprs.into_iter().map(|e| interp_exp(e, Rc::clone(&env))).collect();
+            Reference(Rc::new(RefCell::new(Vector(exprs))))
+        }
         Prim2(op, box e1, box e2) => {
             match (interp_exp(e1, Rc::clone(&env)), interp_exp(e2, env)) {
                 (Int(a), Int(b)) => {
@@ -93,12 +97,6 @@ fn interp_exp(expr: Expr, env: Rc<SymTable<String, Expr>>) -> Expr {
                     }
                 }
                 (_, _) => panic!("integer expected"),
-            }
-        }
-        PrimN(op, args) => {
-            match op.as_str() {
-                "vector" => Vector(args),
-                _ => unreachable!(),
             }
         }
         Let(box Var (x), box e1, box e2) => {
@@ -118,30 +116,40 @@ fn interp_r2(expr: Expr) -> Expr {
 }
 
 
-fn compile(expr: &str, filename: &str) -> std::io::Result<()> {
-    use crate::parser::parse;
-    use crate::compiler::*;
-    let expr = parse(expr);
-    // let expr = uniquify(expr);
-    let expr = remove_complex_opera(expr);
-    let expr = explicate_control(expr);
-    let expr = optimize_jumps(expr);
-    let expr = select_instruction(expr);
-    let expr = allocate_registers(expr);
-    let expr = patch_instructions(expr);
-    print_x86(expr, filename);
-    Ok(())
-}
+// fn compile(expr: &str, filename: &str) -> std::io::Result<()> {
+//     use crate::parser::parse;
+//     use crate::compiler::*;
+//     let expr = parse(expr);
+//     // let expr = uniquify(expr);
+//     let expr = remove_complex_opera(expr);
+//     let expr = explicate_control(expr);
+//     let expr = optimize_jumps(expr);
+//     let expr = select_instruction(expr);
+//     let expr = allocate_registers(expr);
+//     let expr = patch_instructions(expr);
+//     print_x86(expr, filename);
+//     Ok(())
+// }
 
 fn main() -> std::io::Result<()> {
+    use crate::compiler::*;
+    use crate::typesystem::type_checker;
     use parser::parse;
-    let e = "(let (x (vector 10 #t))
-                (vector-set! x 1 #f))";
+    // let e = "(vector 42)";
+    // let e = "(if (< (+ (+ 10 20) 16)
+    //              42)
+    //             10
+    //             42000)";
+    let e = "(let (x (vector 10 #f))
+             (let (y (vector 42 x))
+                (vector-ref (vector-ref y 1) 0)))";
     let e = parse(e);
-    println!("{:?}", e);
-    let e = interp_r2(e);
-    println!("{:?}", e);
-    // compile(e, "r3.asm")
+    let e = type_checker(e);
+    let mut locals = hashmap!();
+    let e = expose_allocation(e, &mut locals);
+    let e = remove_complex_opera(e);
+    let e = explicate_control(e, locals);
+    println!("locals: {:?}", e);
     Ok(())
 }
 

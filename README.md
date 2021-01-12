@@ -29,6 +29,8 @@
 + [R2 四](blog/r2_4.md)
 + [R2 五](blog/r2_5.md)
 + [R3](blog/r3.md)
++ [R3 一](blog/r3_1.md)
++ [R3 二](blog/r3_2.md)
 
 ### 初心
 

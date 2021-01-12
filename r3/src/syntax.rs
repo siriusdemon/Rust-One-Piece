@@ -23,6 +23,10 @@ pub enum Expr {
     PrimN ( String, Vec<Expr> ),
     Hastype ( Box<Expr>, RType ),
     Reference ( Rc<RefCell<Expr>> ),
+    // extend R3, but unseen from user
+    _Collect ( usize ),
+    _Allocate ( usize, RType ),
+    _GlobalValue ( String ),
 }
 
 
@@ -75,16 +79,21 @@ pub enum C0 {
     Prim0(String),
     Prim1(String, Box<C0>),
     Prim2(String, Box<C0>, Box<C0>),
+    Prim3(String, Box<C0>, Box<C0>, Box<C0>),
     Assign(Box<C0>, Box<C0>),
     Return(Box<C0>),
     Seq(Box<C0>, Box<C0>),
     Goto(String),
     If(Box<C0>, Box<C0>, Box<C0>),
+    Allocate(usize, RType),
+    Collect(usize),
+    GlobalValue(String),
+    Void,
 }
 
 #[derive(Debug)]
 pub struct C0Program {
-    pub locals: HashSet<C0>,
+    pub locals: HashMap<C0, Vec<RType>>,
     pub cfg: HashMap<String, C0>,
 }
 
@@ -143,3 +152,30 @@ impl fmt::Display for x86 {
 
 
 // 我怀着对这个世界的祝福苏醒
+
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use Expr::*;
+        match self {
+            Void => write!(f, "_"),
+            Int(n) => write!(f, "{}", n),
+            Bool(b) => write!(f, "{}", b),
+            Var(x) => write!(f, "{}", x),
+            Vector(v) => write!(f, "{:?}", v),
+            Let(box x, box e, box body) => write!(f, "(let ({} {}) {})", x, e, body),
+            If(box e1, box e2, box e3) => write!(f, "(if {} {} {})", e1, e2, e3),
+            Prim0 ( op ) => write!(f, "({})", op),
+            Prim1 ( op, box e ) => write!(f, "({} {})", op, e),
+            Prim2 ( op, box e1, box e2 ) => write!(f, "({} {} {})", op, e1, e2),
+            Prim3 ( op, box e1, box e2, box e3) => write!(f, "({} {} {} {})", op, e1, e2, e3),
+            PrimN ( op, v ) => write!(f, "({} {:?})", op, v),
+            Hastype ( box e, t ) => write!(f, "{}", e),
+            Reference ( r ) => write!(f, "{:?}", r),
+            // extend R3, but unseen from user
+            _Collect ( size ) => write!(f, "(collect {})", size),
+            _Allocate ( size, t ) => write!(f, "(allocate {} {:?})", size, t),
+            _GlobalValue ( name ) => write!(f, "(global-value {})", name),
+            e => panic!("invalid Expr code"),
+        }
+    }
+}

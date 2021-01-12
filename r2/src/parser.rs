@@ -43,20 +43,17 @@ pub fn parse_list(expr: &str) -> Sexpr {
     }
 }
 
-// syntax
-// (let (a 10) (+ 10 a))
-// (- 10 20)
 pub fn parse_sexpr(sexpr: &Sexpr) -> Expr {
     match sexpr {
         Atom(s) => {
             if is_digit(s) { Int(s.parse().unwrap())} 
-            else if s.as_str() == "#t" { Bool(true) }
-            else if s.as_str() == "#f" { Bool(false) }
+            else if s == "#t" { Bool(true) }
+            else if s == "#f" { Bool(false) }
             else { Var(s.to_string()) } 
         }
         List(v) => match v.as_slice() {
             // let expression
-            [Atom(op), List(bind), exp] if op.as_str() == "let" => {
+            [Atom(op), List(bind), exp] if op == "let" => {
                 match bind.as_slice() {
                     [Atom(var), val] if !is_digit(var) => {
                         Let( Box::new(Var(var.to_string())), Box::new(parse_sexpr(val)), Box::new(parse_sexpr(exp)) )
@@ -65,14 +62,14 @@ pub fn parse_sexpr(sexpr: &Sexpr) -> Expr {
                 }
             },
             // if expression
-            [Atom(op), e, e1, e2] if op.as_str() == "if"
+            [Atom(op), e, e1, e2] if op == "if"
                 => If ( Box::new( parse_sexpr(e)), Box::new(parse_sexpr(e1)), Box::new(parse_sexpr(e2))),
             // prim
-            [Atom(op), e1, e2] if is_arithmetic(op.as_str()) || is_cmp(op.as_str()) || is_logical(op.as_str())
+            [Atom(op), e1, e2] if is_arithmetic(op) || is_cmp(op) || is_logical(op)
                 => Prim2 ( op.to_string(), Box::new( parse_sexpr(e1)), Box::new(parse_sexpr(e2))),
-            [Atom(op), e] if is_arithmetic(op.as_str()) || is_logical(op.as_str()) 
+            [Atom(op), e] if is_arithmetic(op) || is_logical(op) 
                 => Prim1 (op.to_string(), Box::new( parse_sexpr(e))),
-            [Atom(op)] if op.as_str() == "read" => Prim0 ( string!("read")),
+            [Atom(op)] if op == "read" => Prim0 ( string!("read")),
             _ => panic!("Invalid syntax!"),
         }
     }

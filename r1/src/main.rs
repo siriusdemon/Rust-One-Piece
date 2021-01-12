@@ -32,21 +32,23 @@ fn interp_r1(expr: Expr) -> i64 {
     return interp_exp(expr, env);
 }
 
-fn compile(expr: &str) -> std::io::Result<()> {
+fn compile(expr: &str, filename: &str) -> std::io::Result<()> {
     use crate::parser::parse;
     use crate::compiler::*;
     let expr = parse(expr);
     let expr = uniquify(expr);
     let expr = remove_complex_opera(expr);
     let expr = explicate_control(expr);
+    println!("{:?}", expr);
     let expr = select_instruction(expr);
     let expr = assign_homes(expr);
     let expr = patch_instructions(expr);
-    print_x86(expr, "r2.asm");
+    print_x86(expr, filename);
     Ok(())
 }
 
 fn main() -> std::io::Result<()> {
-    let s = "(let (x 10) x)";
-    compile(s)
+    // let s = "(let (x 10) x)";
+    let s = "(+ (let (x 10) (+ x 2)) 10)";
+    compile(s, "r1.asm")
 }

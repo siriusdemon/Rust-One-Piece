@@ -213,7 +213,7 @@ fn test_explicate_control() {
     let exp = parse(e);
     let exp = explicate_control(exp);
     let C0Program { locals, cfg: mut blocks } = exp;
-    let (label, codes) = blocks.pop().unwrap();
+    let codes = blocks.get("start").unwrap();
     assert!(matches!(&codes, Seq(box Assign(box Var(x), box Prim2(add, box Int(n1), box Int(n2))), box Return(box Var(x_))) if x == x_));
 }
 
@@ -395,7 +395,7 @@ fn test_shrink2() {
     helper("(and #t #t", Bool(true));
     helper("(- 10 30)", Int(-20));
     helper("(<= 4 3)", Bool(false));
-    helper("(and (> 10 20) (eq? 10 42))", Bool(false));
+    helper("(and (> 100 20) (eq? 10 42))", Bool(false));
 }
 #[test]
 fn test_shrink3() {
@@ -403,4 +403,22 @@ fn test_shrink3() {
     let e = parse(s);
     let e = shrink(e);
     matches!(e, Prim2(op, box Int(n10), box Prim1(op2, box Int(n20))) if n10 == 10 && op2.as_str() == "-");
+}
+#[test]
+fn test_shrink4() {
+    let s = "(if #f (- 10 20) 42)";
+    let e = parse(s);
+    let e = shrink(e);
+    matches!(e, If(box Bool(false), box Prim2(op, box Int(n10), box Prim1(op2, box Int(n20))), box Int(42))
+            if n10 == 10 && op2.as_str() == "-");
+}
+#[test]
+fn test_optimize_jump() {
+    let e = "(if (if #f #t #f) #t #f)"; 
+    let expr = parse(e);
+    let expr = remove_complex_opera(expr);
+    let expr = explicate_control(expr);
+    assert_eq!(5, expr.cfg.len());
+    let expr = optimize_jumps(expr);
+    assert_eq!(3, expr.cfg.len());
 }

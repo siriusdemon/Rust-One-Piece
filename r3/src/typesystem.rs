@@ -1,7 +1,7 @@
 use crate::*;
 use std::hash::Hash;
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug, Copy)]
 pub enum RType {
     Integer,
     Boolean,
@@ -11,55 +11,88 @@ pub enum RType {
 
 use RType::*;
 
-pub fn type_checker(expr: &Expr) -> RType {
+pub fn type_checker(expr: Expr) -> Expr {
     let env = Rc::new(SymTable::new());
     type_checker_expr(expr, env)
 }
 
-fn type_checker_expr(expr: &Expr, env: Rc<SymTable<String, RType>>) -> RType {
+// Env store variable and its type
+// war itself should be wrapped in Hastype
+fn type_checker_expr(expr: Expr, env: Rc<SymTable<String, RType>>) -> Expr {
     match expr {
-        Int(n) => Integer,
-        Bool(b) => Boolean,
-        Expr::Void => RType::Void,
-        Var(x) => env.lookup(&x).clone(),
+        Int(n) => Hastype(Box::new(Int(n)), Integer),
+        Bool(b) => Hastype(Box::new(Bool(b)), Boolean),
+        Expr::Void => Hastype(Box::new(Expr::Void), RType::Void),
+        Var(x) => {
+            let t = env.lookup(&x).clone();
+            Hastype(Box::new(Var(x)), t)
+        }
         Let(box Var(x), box e, box body) => {
-            let etype = type_checker_expr(e, Rc::clone(&env));
-            let new_env = SymTable::extend(hashmap!(x.to_string() => etype), &env);
-            type_checker_expr(body, Rc::new(new_env))
+            if let Hastype(box e, et) = type_checker_expr(e, Rc::clone(&env)) {
+                let new_env = SymTable::extend(hashmap!(x.to_string() => et), &env);
+                if let Hastype(box body, bt) = type_checker_expr(body, Rc::new(new_env)) {
+                    let v = Hastype(Box::new(Var(x)), et);
+                    let e = Hastype(Box::new(e), et);
+                    let body = Hastype(Box::new(body), bt);
+                    return Hastype(Box::new(
+                                Let(Box::new(v), Box::new(e), Box::new(body))), 
+                                bt);
+                }
+                panic!("Should not reach");
+            }
+            panic!("Should not reach");
         }
         If(box e, box e1, box e2) => {
-            let etype = type_checker_expr(e, Rc::clone(&env));
-            assert!(Boolean == etype);
-            if e == &Bool(true) { type_checker_expr(e1, env) } else { type_checker_expr(e2, env) }
+            // here, we force every if expression should return same type
+            let e = type_checker_expr(e, Rc::clone(&env));
+            assert!(matches!(&e, Hastype(box _e, t) if t == &Boolean ));
+            let e1 = type_checker_expr(e1, Rc::clone(&env));
+            if let Hastype(e2, t2) = type_checker_expr(e2, env) {
+                assert!(matches!(&e1, Hastype(box _e, t1) if t1 == &t2));
+                let e2 = Hastype(e2, t2.clone());
+                return Hastype(Box::new(If(Box::new(e), Box::new(e1), Box::new(e2))), t2);
+            }
+            unreachable!();
         }
-        Prim0(op) if op.as_str() == "read" => Integer,
+        Prim0(op) if op.as_str() == "read" => Hastype(Box::new(Prim0(op)), Integer),
         Prim1(op, box e) => {
-            let etype = type_checker_expr(e, env);
+            let e = type_checker_expr(e, env);
             match op.as_str() {
-                "-" => assert!(Integer == etype),
-                "not" => assert!(Boolean == etype),
+                "-" => {
+                    assert!(matches!(&e, Hastype(box _e, t) if t == &Integer));
+                    Hastype(Box::new(Prim1(op, Box::new(e))), Integer)
+                },
+                "not" => {
+                    assert!(matches!(&e, Hastype(box _e, t) if t == &Boolean));
+                    Hastype(Box::new(Prim1(op, Box::new(e))), Boolean)
+                },
                 _ => panic!("unknown Prim1 operator"),
-            };
-            etype
+            }
         }
         Prim2(op, box e1, box e2) => {
-            let e1type = type_checker_expr(e1, Rc::clone(&env));
-            let e2type = type_checker_expr(e2, env);
+            let e1 = type_checker_expr(e1, Rc::clone(&env));
+            let e2 = type_checker_expr(e2, env);
             match op.as_str() {
                 "and" | "or" => { 
-                    assert!(Boolean == e1type); 
-                    assert!(Boolean == e2type);
-                    Boolean
+                    assert!(matches!(&e1, Hastype(box _e, t) if t == &Boolean));
+                    assert!(matches!(&e2, Hastype(box _e, t) if t == &Boolean));
+                    return Hastype(Box::new(Prim2(op, Box::new(e1), Box::new(e2))), Boolean);
                 }
                 ">" | "<" | "<=" | ">=" | "eq?" => {
-                    assert!(Integer == e1type);
-                    assert!(Integer == e2type);
-                    Boolean
+                    assert!(matches!(&e1, Hastype(box _e, t) if t == &Integer));
+                    assert!(matches!(&e2, Hastype(box _e, t) if t == &Integer));
+                    return Hastype(Box::new(Prim2(op, Box::new(e1), Box::new(e2))), Boolean);
                 }
                 "+" | "-" => {
-                    assert!(Integer == e1type);
-                    assert!(Integer == e2type);
-                    Integer
+                    assert!(matches!(&e1, Hastype(box _e, t) if t == &Integer));
+                    assert!(matches!(&e2, Hastype(box _e, t) if t == &Integer));
+                    return Hastype(Box::new(Prim2(op, Box::new(e1), Box::new(e2))), Integer);
+                }
+                "vector-ref" => {
+                    assert!(matches!(&e1, Hastype(box _e, t) if t == &RType::Vector));
+                    assert!(matches!(&e2, Hastype(box _e, t) if t == &Integer));
+                    // here, we can return either vector int or bool
+                    return Hastype(Box::new(Prim2(op, Box::new(e1), Box::new(e2))), Integer);
                 }
                 _ => panic!("unknown Prim2 operator"),
             }
@@ -67,13 +100,13 @@ fn type_checker_expr(expr: &Expr, env: Rc<SymTable<String, RType>>) -> RType {
         Prim3(op, box e1, box e2, box e3) => {
             match op.as_str() {
                 "vector-set!" => {
-                    let t1 = type_checker_expr(e1, Rc::clone(&env));
-                    let t2 = type_checker_expr(e2, Rc::clone(&env));
-                    let t3 = type_checker_expr(e3, env);
-                    assert!(RType::Vector == t1);
-                    assert!(Integer == t2);
+                    let e1 = type_checker_expr(e1, Rc::clone(&env));
+                    let e2 = type_checker_expr(e2, Rc::clone(&env));
+                    let e3 = type_checker_expr(e3, env);
+                    assert!(matches!(&e1, Hastype(box _e, t) if t == &RType::Vector));
+                    assert!(matches!(&e2, Hastype(box _e, t) if t == &RType::Integer));
                     // t3 is any type
-                    return RType::Void;
+                    return Hastype(Box::new(Prim3(op, Box::new(e1), Box::new(e2), Box::new(e3))), RType::Void);
                 }
                 e => {
                     println!("unknown Prim3 {}", e);
@@ -81,12 +114,9 @@ fn type_checker_expr(expr: &Expr, env: Rc<SymTable<String, RType>>) -> RType {
                 }
             }
         }
-        Reference(r) => {
-            let r = r.borrow();
-            match &*r {
-                Expr::Vector(ref _any) => RType::Vector, 
-                _ => panic!("unknown reference type!"),
-            }
+        PrimN(op, mut exprs) if op.as_str() == "vector" => {
+            exprs = exprs.into_iter().map(|e| type_checker_expr(e, Rc::clone(&env))).collect();
+            return Hastype(Box::new(PrimN(op, exprs)), RType::Vector);
         }
         e => {
             println!("unsupported expr: {:?}", e);

@@ -77,7 +77,7 @@ pub enum C0 {
 #[derive(Debug)]
 pub struct C0Program {
     pub locals: HashSet<C0>,
-    pub cfg: Vec<(String, C0)>, // control flow 
+    pub cfg: HashMap<String, C0>,
 }
 
 // x86
